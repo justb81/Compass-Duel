@@ -36,12 +36,18 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.CompassDuel">
 
+        <!-- Portrait lock is a deliberate gameplay choice: the phone is held
+             upright like a wand/compass and the targeting ring is designed for
+             a portrait viewport. Android 16 ignores fixed orientation on large
+             screens; that is acceptable here (the game is a phone-held
+             experience), so the DiscouragedApi/LockedOrientationActivity lint
+             warnings are suppressed intentionally. -->
         <activity
             android:name=".ui.MainActivity"
             android:exported="true"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.CompassDuel"
-            tools:ignore="LockedOrientationActivity">
+            tools:ignore="DiscouragedApi,LockedOrientationActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

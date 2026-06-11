@@ -17,7 +17,7 @@ android {
         // Android 15 (API 35) is the minimum supported version — no backward
         // compatibility below it is required.
         minSdk = 35
-        targetSdk = 35
+        targetSdk = 36
 
         // versionCode: CI sets VERSION_CODE (run_number); fallback to 1 locally.
         versionCode = providers.environmentVariable("VERSION_CODE")
