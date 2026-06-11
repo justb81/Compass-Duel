@@ -46,7 +46,7 @@ Compass-Duel/
 - Google Nearby Connections API (`com.google.android.gms:play-services-nearby`)
 - Android `SensorManager` (`TYPE_ROTATION_VECTOR` + accelerometer)
 - kotlinx.serialization (compact payloads), kotlinx.coroutines
-- Gradle (AGP 9, version catalog, convention plugins), minSdk 26 / targetSdk 35 / compileSdk 37
+- Gradle (AGP 9, version catalog, convention plugins), minSdk 35 (Android 15) / targetSdk 35 / compileSdk 37
 - CI/CD: GitHub Actions, release-please, Gradle Play Publisher
 
 ## Key Conventions

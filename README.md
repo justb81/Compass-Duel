@@ -20,7 +20,7 @@ technical specification.
 - **Serialization:** kotlinx.serialization (compact game-state payloads)
 - **Build:** Gradle with version catalog, AGP 9, convention plugins
 - **CI/CD:** GitHub Actions, release-please (Conventional Commits), Gradle Play Publisher
-- **Min SDK:** 26 (Android 8.0 — Nearby Connections requirement)
+- **Min SDK:** 35 (Android 15 — no backward compatibility below it)
 
 Single source of truth for all versions: `gradle/libs.versions.toml`.
 

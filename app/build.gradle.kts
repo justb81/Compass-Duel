@@ -14,8 +14,9 @@ android {
 
     defaultConfig {
         applicationId = "com.justb81.compassduel"
-        // API 26 (Android 8.0) is the Nearby Connections minimum requirement.
-        minSdk = 26
+        // Android 15 (API 35) is the minimum supported version — no backward
+        // compatibility below it is required.
+        minSdk = 35
         targetSdk = 35
 
         // versionCode: CI sets VERSION_CODE (run_number); fallback to 1 locally.
@@ -25,8 +26,6 @@ android {
         // versionName: release-please sets VERSION_NAME, fallback to hardcoded value.
         versionName = providers.environmentVariable("VERSION_NAME")
             .orElse("0.1.0").get() // x-release-please-version
-
-        vectorDrawables { useSupportLibrary = true }
     }
 }
 
