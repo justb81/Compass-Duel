@@ -55,8 +55,9 @@ Compass-Duel/
 
 All content in this repository must be written in **English**: code, comments,
 commit messages, PR titles/descriptions, issues, and Markdown. The only
-exception is localized string resources (`values-de/`, `values-fr/`,
-`values-es/`); the default `values/strings.xml` stays English.
+exception is localized string resources (`values-de/`); the default
+`values/strings.xml` stays English. Supported languages: English (default) and
+German. Additional languages may be added later.
 
 ### Active Early Development — No Cross-Version Fallbacks
 

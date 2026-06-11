@@ -241,14 +241,14 @@ jobs:
           NOTES_DIR="app/src/main/play/release-notes"
           if [ -z "${NOTES//[[:space:]]/}" ]; then
             echo "::notice::Release body is empty — writing placeholder Play Store notes."
-            for LOCALE in en-US de-DE fr-FR es-ES; do
+            for LOCALE in en-US de-DE; do
               mkdir -p "${NOTES_DIR}/${LOCALE}"
               echo "Bug fixes and improvements." > "${NOTES_DIR}/${LOCALE}/default.txt"
             done
             exit 0
           fi
 
-          for LOCALE in en-US de-DE fr-FR es-ES; do
+          for LOCALE in en-US de-DE; do
             mkdir -p "${NOTES_DIR}/${LOCALE}"
             echo "$NOTES" > "${NOTES_DIR}/${LOCALE}/default.txt"
           done
