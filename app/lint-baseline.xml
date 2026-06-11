@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.2.1" type="baseline" client="gradle" dependencies="true" name="AGP (9.2.1)" variant="all" version="9.2.1">
+
+    <!--
+        Intentionally baselined: bumping the Kotlin-coupled plugins to 2.4.0 is
+        blocked because Kotlin 2.4.0's module-name change breaks KSP code
+        generation for Hilt/Dagger (google/ksp#2964, open). These entries match
+        the exact "2.4.0" message, so when a version newer than 2.4.0 ships the
+        warning re-surfaces and we are reminded to revisit the upgrade. See the
+        comment on the `kotlin` version in gradle/libs.versions.toml.
+    -->
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlin.plugin.compose than 2.3.21 is available: 2.4.0"
+        errorLine1="kotlin = &quot;2.3.21&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="7"
+            column="10"/>
+    </issue>
+
+    <issue
+        id="NewerVersionAvailable"
+        message="A newer version of org.jetbrains.kotlin.plugin.serialization than 2.3.21 is available: 2.4.0"
+        errorLine1="kotlin = &quot;2.3.21&quot;"
+        errorLine2="         ~~~~~~~~">
+        <location
+            file="../gradle/libs.versions.toml"
+            line="7"
+            column="10"/>
+    </issue>
+
+</issues>

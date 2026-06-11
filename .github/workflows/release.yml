@@ -1,0 +1,304 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to build and publish (e.g. v0.2.0). Required for manual dispatch.'
+        required: false
+        type: string
+      play_track:
+        description: 'Play Store track to publish to'
+        required: false
+        default: 'internal'
+        type: choice
+        options:
+          - internal
+          - alpha
+          - beta
+          - production
+      play_status:
+        description: 'Play Store release status'
+        required: false
+        default: 'DRAFT'
+        type: choice
+        options:
+          - DRAFT
+          - COMPLETED
+
+permissions:
+  contents: read
+
+# Prevent concurrent release runs — queues new pushes rather than running them
+# in parallel, which would create conflicting GitHub Releases and Play edits.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+      body: ${{ steps.release.outputs.body }}
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  build-release:
+    name: Build & Publish Release
+    needs: release-please
+    if: ${{ needs.release-please.outputs.release_created || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.release-please.outputs.version }}
+      TAG: ${{ needs.release-please.outputs.tag_name }}
+    steps:
+      # build-release uses `gh release upload` which authenticates via the
+      # `GH_TOKEN` env var, not git-stored credentials, so the persisted
+      # credential is unused — turn it off.
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.tag || github.sha }}
+
+      # Resolve TAG and VERSION: prefer release-please outputs; fall back to the
+      # workflow_dispatch `tag` input so manual re-publishes work end-to-end.
+      - name: Resolve version and tag
+        if: github.event_name == 'workflow_dispatch' && inputs.tag != ''
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          echo "TAG=${INPUT_TAG}" >> "$GITHUB_ENV"
+          echo "VERSION=${INPUT_TAG#v}" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-android-build
+
+      # -- Re-mask signing secrets so they are redacted even if a Gradle
+      # plugin, stack trace, or diagnostic task echoes environment state.
+      - name: Mask signing secrets
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          echo "::add-mask::$KEY_ALIAS"
+          echo "::add-mask::$KEY_PASSWORD"
+
+      # -- Prepare release signing ----------------------------------------
+      - name: Decode Keystore
+        id: keystore
+        run: |
+          if [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+            echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Write signing credentials to ~/.gradle/gradle.properties (chmod 600)
+      # instead of exporting them as plain environment variables. Gradle reads
+      # project properties from this file without ever printing them.
+      - name: Write signing credentials to Gradle properties
+        if: steps.keystore.outputs.available == 'true'
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          mkdir -p ~/.gradle
+          {
+            printf 'compassduel.signing.storePassword=%s\n' "$KEYSTORE_PASSWORD"
+            printf 'compassduel.signing.keyAlias=%s\n' "$KEY_ALIAS"
+            printf 'compassduel.signing.keyPassword=%s\n' "$KEY_PASSWORD"
+          } >> ~/.gradle/gradle.properties
+          chmod 600 ~/.gradle/gradle.properties
+
+      # -- Check Play Store credentials -----------------------------------
+      - name: Check Play Store credentials
+        id: play-store
+        env:
+          GOOGLE_PLAY_KEY: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          if [ -n "$GOOGLE_PLAY_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::GOOGLE_PLAY_SERVICE_ACCOUNT_JSON secret not set — skipping Play Store upload."
+          fi
+
+      # -- Signed release builds (APK + AAB) ------------------------------
+      # Signing credentials are intentionally absent from env here — they were
+      # written to ~/.gradle/gradle.properties above and Gradle reads them as
+      # project properties, keeping them out of the environment and any logs.
+      - name: Build signed release (APK + AAB)
+        if: steps.keystore.outputs.available == 'true'
+        env:
+          KEYSTORE_FILE: /tmp/release.keystore
+          VERSION_NAME: ${{ needs.release-please.outputs.version }}
+          VERSION_CODE: ${{ github.run_number }}
+        run: ./gradlew :app:assembleRelease :app:bundleRelease
+
+      # -- Collect release artifacts ---------------------------------------
+      - name: Collect release artifacts
+        run: |
+          mkdir -p release-assets
+
+          for apk in app/build/outputs/apk/release/*.apk; do
+            [ -f "$apk" ] && cp "$apk" "release-assets/compassduel-${VERSION}-release.apk"
+          done
+          for aab in app/build/outputs/bundle/release/*.aab; do
+            [ -f "$aab" ] && cp "$aab" "release-assets/compassduel-${VERSION}-release.aab"
+          done
+
+          # Native debug symbols (AGP emits these when debugSymbolLevel is set).
+          SYMS="app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip"
+          if [ -f "$SYMS" ]; then
+            cp "$SYMS" "release-assets/compassduel-${VERSION}-native-debug-symbols.zip"
+          fi
+
+          # ProGuard/R8 mapping file — Play Console needs it to de-obfuscate
+          # release stack traces.
+          MAPPING="app/build/outputs/mapping/release/mapping.txt"
+          if [ -f "$MAPPING" ]; then
+            cp "$MAPPING" "release-assets/compassduel-${VERSION}-mapping.txt"
+          fi
+
+          ls -lh release-assets/
+
+      # -- Stage artefacts for the Play upload ----------------------------
+      # Gradle Play Publisher's artifactDir mode uploads every AAB it finds in
+      # the given directory and pairs a sibling `<name>.mapping.txt` as the
+      # per-versionCode deobfuscation file.
+      - name: Stage Play artifacts
+        if: steps.keystore.outputs.available == 'true'
+        run: |
+          mkdir -p play-artifacts
+          AAB="app/build/outputs/bundle/release/app-release.aab"
+          [ -f "$AAB" ] || AAB=$(ls app/build/outputs/bundle/release/*.aab 2>/dev/null | head -n1 || true)
+          if [ -n "$AAB" ] && [ -f "$AAB" ]; then
+            cp "$AAB" "play-artifacts/app.aab"
+            if [ -f "app/build/outputs/mapping/release/mapping.txt" ]; then
+              cp "app/build/outputs/mapping/release/mapping.txt" "play-artifacts/app.mapping.txt"
+            fi
+          fi
+          ls -lh play-artifacts/
+
+      # -- Upload to GitHub Release ----------------------------------------
+      - name: Upload release assets to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for file in release-assets/*.apk release-assets/*.aab release-assets/*-native-debug-symbols.zip release-assets/*-mapping.txt; do
+            [ -f "$file" ] && gh release upload "${TAG}" "$file" --clobber
+          done
+
+      # -- Append download links to release notes -------------------------
+      - name: Update Release Notes with download links
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+          VERSION: ${{ needs.release-please.outputs.version }}
+          REPO: ${{ github.repository }}
+          ASSETS_DIR: release-assets
+        run: bash .github/scripts/append-download-links.sh
+
+      # -- Extract changelog for Play Store --------------------------------
+      - name: Generate Play Store changelog
+        env:
+          RELEASE_BODY: ${{ needs.release-please.outputs.body }}
+        run: |
+          NOTES=$(echo "$RELEASE_BODY" | sed -E \
+            -e 's/^\*\*([^*]+)\*\*/\1/g' \
+            -e 's/\*\*//g' \
+            -e 's/\[#[0-9]+\]\([^)]*\)//g' \
+            -e 's/\[([^]]*)\]\([^)]*\)/\1/g' \
+            -e 's/\([0-9a-f]{7}\)//g' \
+            -e 's/, *closes *//g' \
+            -e 's/[[:space:]]*$//g')
+
+          NOTES=$(echo "$NOTES" | sed '/./,$!d' | sed -e :a -e '/^[[:space:]]*$/{ $d; N; ba; }')
+
+          if [ ${#NOTES} -gt 500 ]; then
+            NOTES="${NOTES:0:497}..."
+          fi
+
+          NOTES_DIR="app/src/main/play/release-notes"
+          if [ -z "${NOTES//[[:space:]]/}" ]; then
+            echo "::notice::Release body is empty — writing placeholder Play Store notes."
+            for LOCALE in en-US de-DE; do
+              mkdir -p "${NOTES_DIR}/${LOCALE}"
+              echo "Bug fixes and improvements." > "${NOTES_DIR}/${LOCALE}/default.txt"
+            done
+            exit 0
+          fi
+
+          for LOCALE in en-US de-DE; do
+            mkdir -p "${NOTES_DIR}/${LOCALE}"
+            echo "$NOTES" > "${NOTES_DIR}/${LOCALE}/default.txt"
+          done
+
+          echo "--- Play Store changelog (en-US) ---"
+          cat "${NOTES_DIR}/en-US/default.txt"
+
+      # -- Determine Play Store release status ------------------------------
+      - name: Determine Play Store release status
+        id: play-status
+        run: |
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          if [ "$MAJOR" -ge 1 ]; then
+            echo "status=COMPLETED" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=DRAFT" >> "$GITHUB_OUTPUT"
+          fi
+
+      # -- Write Play service-account credentials to disk -------------------
+      - name: Write Play service account file
+        if: steps.keystore.outputs.available == 'true' && steps.play-store.outputs.available == 'true'
+        env:
+          GOOGLE_PLAY_KEY: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$GOOGLE_PLAY_KEY" > /tmp/gpp-sa.json
+          chmod 600 /tmp/gpp-sa.json
+          echo "GOOGLE_PLAY_SERVICE_ACCOUNT_FILE=/tmp/gpp-sa.json" >> "$GITHUB_ENV"
+
+      # -- Publish to Google Play Store ------------------------------------
+      - name: Publish to Google Play via GPP
+        if: steps.keystore.outputs.available == 'true' && steps.play-store.outputs.available == 'true'
+        run: ./gradlew :app:publishReleaseBundle -PplayTrack=${{ inputs.play_track || 'internal' }} -PplayStatus=${{ inputs.play_status || steps.play-status.outputs.status }}
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: compassduel-release-${{ needs.release-please.outputs.version }}
+          path: |
+            release-assets/*.apk
+            release-assets/*.aab
+            release-assets/*-native-debug-symbols.zip
+            release-assets/*-mapping.txt
+
+      # -- Clean up sensitive files on disk ----------------------------------
+      # Runs unconditionally (even on failure) so secrets are never left on a
+      # potentially-reused runner between jobs.
+      - name: Clean up signing credentials
+        if: always()
+        run: |
+          rm -f /tmp/release.keystore /tmp/gpp-sa.json
+          if [ -f ~/.gradle/gradle.properties ]; then
+            sed -i '/^compassduel\.signing\./d' ~/.gradle/gradle.properties
+          fi
