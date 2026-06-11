@@ -1,7 +1,11 @@
 [versions]
 agp = "9.2.1"
+# Kotlin is intentionally held at 2.3.21 (latest 2.3.x). Do NOT bump to 2.4.0
+# yet: Kotlin 2.4.0 changed default module names to "{group}:{project_name}",
+# whose colon breaks KSP code generation for Hilt/Dagger (google/ksp#2964, open).
+# The compose-compiler and kotlin-serialization plugins track this version.
 kotlin = "2.3.21"
-ksp = "2.3.8"
+ksp = "2.3.9"
 hilt = "2.59.2"
 compose-bom = "2026.05.01"
 lifecycle = "2.10.0"
@@ -20,11 +24,10 @@ detekt = "1.23.8"
 
 [libraries]
 # AndroidX Core
-androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version = "1.18.0" }
 androidx-lifecycle-runtime = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "lifecycle" }
 androidx-lifecycle-runtime-compose = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "lifecycle" }
 androidx-lifecycle-viewmodel = { group = "androidx.lifecycle", name = "lifecycle-viewmodel-compose", version.ref = "lifecycle" }
-androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version = "1.11.0" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version = "1.13.0" }
 
 # Compose
 compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "compose-bom" }
