@@ -1,0 +1,43 @@
+# Android / Gradle
+*.iml
+.gradle/
+.kotlin/
+local.properties
+.idea/
+.DS_Store
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+bin/
+gen/
+out/
+release/
+
+# Keystore / Secrets – NEVER commit these
+*.jks
+*.keystore
+secrets.properties
+google-services.json
+local.defaults.properties
+
+# Play Store publishing (populated by CI)
+play-artifacts/
+app/src/main/play/release-notes/
+
+# OS
+Thumbs.db
+
+.kotlin/sessions
+/.claude/settings.local.json
+/hs_err_*.log
+/replay_*.log
+
+# Git worktrees created by agents
+/wt/
+/.claude/worktrees/

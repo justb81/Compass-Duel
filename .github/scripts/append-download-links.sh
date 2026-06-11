@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Append a download-links table to an existing GitHub Release's notes.
+# Reads environment variables set by the workflow:
+#   TAG        – the release tag (e.g. v0.2.0)
+#   VERSION    – the version string (e.g. 0.2.0)
+#   REPO       – the GitHub repository slug (e.g. owner/repo)
+#   ASSETS_DIR – directory containing the release asset files
+set -euo pipefail
+
+: "${TAG:?TAG environment variable is required}"
+: "${VERSION:?VERSION environment variable is required}"
+: "${REPO:?REPO environment variable is required}"
+: "${ASSETS_DIR:?ASSETS_DIR environment variable is required}"
+
+BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+DOWNLOADS="---"
+DOWNLOADS="${DOWNLOADS}\n\n## Downloads\n"
+DOWNLOADS="${DOWNLOADS}\n| Asset | Link |"
+DOWNLOADS="${DOWNLOADS}\n|-------|------|"
+
+if [ -f "${ASSETS_DIR}/compassduel-${VERSION}-release.apk" ]; then
+    DOWNLOADS="${DOWNLOADS}\n| Signed APK | [compassduel-${VERSION}-release.apk](${BASE}/compassduel-${VERSION}-release.apk) |"
+fi
+
+# Fetch existing release notes and append the download section
+EXISTING=$(gh release view "${TAG}" --json body -q .body)
+UPDATED=$(printf "%s\n\n%b" "$EXISTING" "$DOWNLOADS")
+gh release edit "${TAG}" --notes "$UPDATED"

@@ -1,0 +1,332 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      android: ${{ steps.filter.outputs.android }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+        id: filter
+        with:
+          filters: |
+            android:
+              - 'app/**'
+              - 'build-logic/**'
+              - '*.gradle.kts'
+              - 'gradle/**'
+              - 'gradle.properties'
+              - '.github/actions/**'
+              - 'config/detekt/**'
+
+  test-and-build:
+    name: Test & Build
+    needs: changes
+    if: needs.changes.outputs.android == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup-android-build
+
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest
+
+      # Static analysis — detekt runs on every subproject; baselines commit the
+      # accepted legacy findings. Any new finding fails the build.
+      - name: Run detekt
+        run: ./gradlew detektAll
+
+      # Android Lint — abortOnError is set on the app module. Debug variant is
+      # sufficient for PR feedback; release-variant lint runs as part of release.yml.
+      - name: Run Android Lint
+        run: ./gradlew :app:lintDebug
+
+      # Always gather SARIF so PRs that failed lint/detekt still get inline
+      # annotations in the Files-changed tab. Flatten to unique names because
+      # upload-sarif rejects duplicate basenames across subdirectories.
+      - name: Collect SARIF reports
+        if: always()
+        run: |
+          mkdir -p sarif-reports
+          while IFS= read -r f; do
+            mod=$(echo "$f" | cut -d/ -f1)
+            name=$(basename "$f")
+            cp "$f" "sarif-reports/${mod}-${name}"
+          done < <(find app -type f -name "*.sarif" 2>/dev/null)
+          ls -la sarif-reports/
+
+      # Upload each SARIF file via the REST API with a single retry per file.
+      # A persistent upload failure emits ::error:: annotations and a
+      # workflow-summary entry so failures are never silently hidden.
+      - name: Upload SARIF reports
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          upload_with_retry() {
+            local sarif_file="$1"
+            local category="$2"
+
+            if [ ! -f "$sarif_file" ]; then
+              echo "No SARIF file for ${category} — skipping"
+              return 0
+            fi
+
+            local payload_file
+            payload_file=$(mktemp --suffix=.json)
+
+            python3 - "$sarif_file" > "$payload_file" <<'PYEOF'
+          import sys, json, gzip, base64, os
+          sarif_file = sys.argv[1]
+          with open(sarif_file, 'rb') as f:
+              encoded = base64.b64encode(gzip.compress(f.read())).decode()
+          print(json.dumps({
+              "commit_sha": os.environ["GITHUB_SHA"],
+              "ref":        os.environ["GITHUB_REF"],
+              "sarif":      encoded,
+          }))
+          PYEOF
+
+            local attempt
+            for attempt in 1 2; do
+              if gh api --method POST \
+                   "repos/$GITHUB_REPOSITORY/code-scanning/sarifs" \
+                   --input "$payload_file" > /dev/null; then
+                echo "Uploaded ${category} (attempt ${attempt})"
+                rm -f "$payload_file"
+                return 0
+              fi
+              if [ "$attempt" -lt 2 ]; then
+                echo "Attempt 1 failed for ${category} — retrying in 15 s..."
+                sleep 15
+              fi
+            done
+
+            rm -f "$payload_file"
+            echo "::error title=SARIF upload failed::${category} could not be uploaded after 2 attempts"
+            return 1
+          }
+
+          rc=0
+          failed_categories=()
+          upload_with_retry "sarif-reports/app-detekt.sarif" "app-detekt" \
+            || { rc=1; failed_categories+=("app-detekt"); }
+          upload_with_retry "sarif-reports/app-lint-results-debug.sarif" "app-lint" \
+            || { rc=1; failed_categories+=("app-lint"); }
+
+          if [ "$rc" -ne 0 ]; then
+            {
+              printf '## Warning: SARIF upload failures\n\n'
+              printf 'The following uploads failed after 2 attempts:\n\n'
+              for cat in "${failed_categories[@]}"; do
+                printf -- '- `%s`\n' "$cat"
+              done
+              printf '\nCode-scanning annotations may be incomplete.\n'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$rc"
+
+      - name: Archive analysis reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: static-analysis-reports
+          path: |
+            app/build/reports/detekt/
+            app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+
+      - name: Post PR lint summary
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Count findings in each detekt XML report (Checkstyle-style).
+            const countDetekt = (file) => {
+              if (!fs.existsSync(file)) return 0;
+              const xml = fs.readFileSync(file, 'utf8');
+              return (xml.match(/<error /g) || []).length;
+            };
+
+            // Count findings in an Android Lint SARIF by severity.
+            const countSarif = (file) => {
+              if (!fs.existsSync(file)) return { error: 0, warning: 0, note: 0 };
+              const sarif = JSON.parse(fs.readFileSync(file, 'utf8'));
+              const counts = { error: 0, warning: 0, note: 0 };
+              for (const run of sarif.runs || []) {
+                for (const result of run.results || []) {
+                  const level = result.level || 'warning';
+                  if (counts[level] !== undefined) counts[level]++;
+                }
+              }
+              return counts;
+            };
+
+            const detektCount = countDetekt('app/build/reports/detekt/detekt.xml');
+            const lintCounts = countSarif('app/build/reports/lint-results-debug.sarif');
+
+            const body = [
+              '<!-- compassduel-lint-report -->',
+              '### Static analysis summary',
+              '',
+              '> Baseline-covered legacy findings are suppressed. Numbers below are **new** findings on this PR.',
+              '',
+              '**detekt (Kotlin)**',
+              '',
+              '| Module | New findings |',
+              '|---|---|',
+              `| \`app\` | ${detektCount} |`,
+              '',
+              '**Android Lint**',
+              '',
+              '| Module | Errors | Warnings | Notes |',
+              '|---|---|---|---|',
+              `| \`app\` | ${lintCounts.error} | ${lintCounts.warning} | ${lintCounts.note} |`,
+              '',
+              'Inline annotations are posted to the **Files changed** tab via GitHub code scanning. Full HTML reports are attached as the `static-analysis-reports` workflow artifact.',
+            ].join('\n');
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const marker = '<!-- compassduel-lint-report -->';
+
+            const existing = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number, per_page: 100 },
+            );
+            const found = existing.find((c) => c.body && c.body.includes(marker));
+
+            if (found) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: found.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      # Surface a filtered failure excerpt from the failing job's raw log as
+      # a PR comment keyed by the `<!-- compassduel-build-log -->` marker, so
+      # both humans and MCP agents can read it without touching the Actions UI.
+      - name: Post failing build log
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        env:
+          MARKER: '<!-- compassduel-build-log -->'
+          CURRENT_JOB: ${{ github.job }}
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const run_id = context.runId;
+            const pr = context.issue.number;
+
+            const jobs = await github.paginate(
+              github.rest.actions.listJobsForWorkflowRun,
+              { owner, repo, run_id, per_page: 100 },
+            );
+            const job =
+              jobs.find((j) => j.name.startsWith(process.env.CURRENT_JOB)) ||
+              jobs.find((j) => j.conclusion === 'failure');
+            if (!job) {
+              core.warning('No failing job found in this run');
+              return;
+            }
+
+            const resp = await github.request(
+              'GET /repos/{owner}/{repo}/actions/jobs/{job_id}/logs',
+              { owner, repo, job_id: job.id },
+            );
+            const raw =
+              typeof resp.data === 'string'
+                ? resp.data
+                : Buffer.from(resp.data).toString('utf8');
+
+            const patterns = [
+              /^FAILURE:/i,
+              /^BUILD FAILED/i,
+              /> Task .* FAILED/,
+              /^e: /,
+              /\.kt:\d+:\d+/,
+              /^\s*Error: /i,
+              /<failure[\s>]/,
+              / error /,
+              /^Exception |Caused by: /,
+              /AssertionError|AssertionFailedError/,
+            ];
+            const lines = raw.split('\n');
+            const keep = new Set();
+            lines.forEach((ln, i) => {
+              if (patterns.some((p) => p.test(ln))) {
+                const start = Math.max(0, i - 5);
+                const end = Math.min(lines.length - 1, i + 20);
+                for (let k = start; k <= end; k++) keep.add(k);
+              }
+            });
+            const excerpt = [...keep]
+              .sort((a, b) => a - b)
+              .map((i) => lines[i])
+              .join('\n');
+            const clipped =
+              excerpt.length > 55000
+                ? excerpt.slice(-55000) + '\n… (truncated — open the Actions UI for the full log)'
+                : excerpt;
+
+            const body = [
+              process.env.MARKER,
+              `### Build failure — \`${job.name}\` (run ${run_id})`,
+              `Actions log: ${job.html_url}`,
+              '',
+              '```text',
+              clipped || '(no filter matches — open the Actions log linked above)',
+              '```',
+            ].join('\n');
+
+            const existingComments = await github.paginate(
+              github.rest.issues.listComments,
+              { owner, repo, issue_number: pr, per_page: 100 },
+            );
+            const found = existingComments.find(
+              (c) => c.body && c.body.includes(process.env.MARKER),
+            );
+            if (found) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: found.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr,
+                body,
+              });
+            }
