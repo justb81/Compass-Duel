@@ -204,12 +204,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # nullglob: unmatched globs expand to nothing instead of the literal
+          # pattern, so this step is a graceful no-op when no signed artifacts
+          # were produced (e.g. signing secrets unset) rather than failing on a
+          # non-existent file under `set -e`.
+          shopt -s nullglob
           for file in release-assets/*.apk release-assets/*.aab release-assets/*-native-debug-symbols.zip release-assets/*-mapping.txt; do
-            [ -f "$file" ] && gh release upload "${TAG}" "$file" --clobber
+            gh release upload "${TAG}" "$file" --clobber
           done
 
       # -- Append download links to release notes -------------------------
+      # Only meaningful when a signed build produced downloadable assets; skip
+      # otherwise so release notes don't get an empty Downloads table.
       - name: Update Release Notes with download links
+        if: steps.keystore.outputs.available == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
