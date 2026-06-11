@@ -1,0 +1,412 @@
+# Compass Duel ðŸ§­âš”ï¸
+### Complete Game Concept & Technical Specification
+
+***
+
+## Executive Summary
+
+**Compass Duel** is a local Android multiplayer game for 2â€“4 players that uses physical device orientation as its primary game mechanic. Players aim their smartphone at opponents using the built-in magnetometer and gyroscope, then execute attacks, defensive moves, and special abilities by tilting the device. All communication runs fully offline via the **Google Nearby Connections API** (BLE + Wi-Fi P2P). The game works on trains, in cars, or on buses â€” no internet connection required, no large body movements needed.
+
+***
+
+## Game Concept
+
+### Vision
+
+Every player holds their smartphone like a **magic wand or flashlight**. The screen shows in which direction opponents are sitting relative to you. To attack an opponent, you physically tilt your phone in their direction and trigger an action. Whoever twitches their phone first has attacked â€” but whoever keeps their phone flat is in shield mode. The tension comes from ambiguity: everyone can see who is aiming at whom.
+
+### Thematic Setting: "Elemental Duel"
+
+Each player chooses an element (Fire ðŸ”¥, Water ðŸ’§, Earth ðŸŒ¿, Lightning âš¡). Elements have classic strength/weakness relationships:
+
+| Attacker | Strong Against | Weak Against |
+|---|---|---|
+| Fire ðŸ”¥ | Earth | Water |
+| Water ðŸ’§ | Fire | Lightning |
+| Earth ðŸŒ¿ | Lightning | Fire |
+| Lightning âš¡ | Water | Earth |
+
+The chosen element also determines the attack gesture (see Game Mechanics).
+
+***
+
+## Game Mechanics
+
+### Core Principle
+
+1. At game start, one player becomes the **Host**. All others join via automatic BLE discovery.
+2. The Host assigns each player a **seat position** (entered once manually or determined via a short calibration round).
+3. Each player's screen displays a **compass ring** with colored markers for each opponent â€” corresponding to their real position in the space.
+4. A **targeting reticle** (based on current phone orientation) rotates live. When it points at an opponent within a tolerance angle â†’ opponent is locked on.
+
+### Actions
+
+| Action | Gesture | Description |
+|---|---|---|
+| **Attack** | Tilt phone toward opponent + quick shake | Deals damage if opponent is in targeting zone |
+| **Shield** | Hold phone flat (horizontal) | Fully blocks incoming attacks |
+| **Dodge** | Quick tilt in opposite direction | Reduces damage by 50%, 2s cooldown |
+| **Special** | Double quick shake | Element-specific attack (higher damage, longer cooldown) |
+
+### Hit Detection
+
+A hit is only registered when:
+- The attacker's **azimuth angle** is within **Â±25Â°** of the actual bearing toward the target [^1]
+- The tilt gesture (pitch angle > 20Â°) is correctly detected [^2]
+- The attack arrives at the Host within **200ms** of the gesture timestamp [^3]
+
+All inputs are evaluated centrally on the Host device â€” no client-side hit detection, preventing cheating.
+
+### Round Structure
+
+```
+Lobby â†’ Calibration (10s) â†’ Combat Phase (90s) â†’ Results â†’ Rematch?
+```
+
+- **Combat Phase:** Each player starts with 100 HP. First to reach 0 is eliminated.
+- **Last survivor** wins the round.
+- **Best of 3 rounds** â†’ overall winner.
+
+### Special Rules for 3â€“4 Players
+
+- Players can "block" each other: a player in shield mode absorbs attacks that would fly "through" them.
+- **Free-for-All:** Everyone targets everyone. Optional: 2v2 team mode with shared HP pools.
+- The screen shows when someone is aiming at you (warning indicator) â€” giving time for a dodge or shield.
+
+***
+
+## Technical Architecture
+
+### Overview
+
+```
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚           HOST (Player 1)           â”‚
+â”‚  â€¢ Game State Manager               â”‚
+â”‚  â€¢ Hit Detection Engine             â”‚
+â”‚  â€¢ Compass/Position Registry        â”‚
+â”‚  â€¢ Nearby Connections Advertiser    â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+             â”‚ Nearby Connections (BLE + WiFi P2P)
+    â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”
+    â”‚                 â”‚
+â”Œâ”€â”€â”€â–¼â”€â”€â”€â”         â”Œâ”€â”€â”€â–¼â”€â”€â”€â”
+â”‚Client â”‚         â”‚Client â”‚
+â”‚Player2â”‚  ...    â”‚Player4â”‚
+â”‚Sensor â”‚         â”‚Sensor â”‚
+â”‚Input  â”‚         â”‚Input  â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”˜         â””â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+**Data flow per frame (~100ms tick):**
+1. Each client reads sensor data (azimuth, pitch, roll) + registers gesture events
+2. Client sends a compact input payload to Host (`BYTES` payload, ~50 bytes)
+3. Host evaluates all inputs, calculates new game state
+4. Host broadcasts game state to all clients (~200 bytes)
+5. Clients render their respective screens
+
+### Nearby Connections API
+
+The **Google Nearby Connections API** serves as the communication layer. It abstracts Bluetooth Classic, BLE, and Wi-Fi behind a unified peer-to-peer API and works completely offline [^4]. The recommended topology is **P2P_STAR**: one hub (Host) accepts connections from up to N spokes (Clients) [^5].
+
+```kotlin
+// Host: Start advertising
+connectionsClient.startAdvertising(
+    localEndpointName,
+    SERVICE_ID,
+    connectionLifecycleCallback,
+    AdvertisingOptions.Builder()
+        .setStrategy(Strategy.P2P_STAR)
+        .build()
+)
+
+// Client: Start discovery
+connectionsClient.startDiscovery(
+    SERVICE_ID,
+    endpointDiscoveryCallback,
+    DiscoveryOptions.Builder()
+        .setStrategy(Strategy.P2P_STAR)
+        .build()
+)
+
+// Send payload (Host â†’ all Clients)
+connectionsClient.sendPayload(
+    endpointIds,  // List of all connected endpoints
+    Payload.fromBytes(gameStateBytes)
+)
+```
+
+Initial connection setup takes 2â€“7 seconds [^6]. After that, latency for small `BYTES` payloads over BLE (~20ms) is fully acceptable [^3]. Game actions don't require a continuous data stream â€” only event-based payloads â€” which significantly relaxes latency requirements.
+
+### Sensor Stack
+
+#### Compass (Azimuth)
+
+Phone orientation is determined via **`Sensor.TYPE_ROTATION_VECTOR`** â€” a software fusion sensor combining accelerometer, magnetometer, and gyroscope, significantly more stable than raw `TYPE_MAGNETIC_FIELD` [^7]. Output is a quaternion from which azimuth (north = 0Â°), pitch, and roll are extracted via `SensorManager.getRotationMatrix()` + `SensorManager.getOrientation()` [^1].
+
+```kotlin
+sensorManager.registerListener(
+    sensorEventListener,
+    sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR),
+    SensorManager.SENSOR_DELAY_GAME  // ~50ms update rate
+)
+
+// In onSensorChanged():
+val rotationMatrix = FloatArray(9)
+SensorManager.getRotationMatrix(rotationMatrix, null, event.values)
+
+// Remap coordinate system for portrait-held phone
+val remappedMatrix = FloatArray(9)
+SensorManager.remapCoordinateSystem(
+    rotationMatrix,
+    SensorManager.AXIS_X,
+    SensorManager.AXIS_Z,
+    remappedMatrix
+)
+
+val orientation = FloatArray(3)
+SensorManager.getOrientation(remappedMatrix, orientation)
+// orientation = Azimuth (compass direction in radians)
+// orientation[^1] = Pitch (forward/backward tilt)
+// orientation[^2] = Roll (sideways tilt)
+```
+
+Important: `remapCoordinateSystem()` is required when the device is not lying flat on a table â€” when held upright, the coordinate system must be adjusted [^2][^8].
+
+#### Tilt Detection (Attack Gesture)
+
+Attack gestures are detected via a combination of pitch threshold + acceleration spike:
+
+```kotlin
+data class GestureState(
+    val azimuth: Float,         // Current compass direction (0â€“360Â°)
+    val pitch: Float,           // Forward tilt angle
+    val roll: Float,            // Sideways tilt angle
+    val shakeDetected: Boolean,
+    val isShielding: Boolean    // pitch < 15Â° â†’ holding flat = shield
+)
+
+// Shake detection via acceleration delta
+val acceleration = sqrt(x*x + y*y + z*z) - SensorManager.GRAVITY_EARTH
+if (acceleration > SHAKE_THRESHOLD) {  // ~2.5 m/sÂ²
+    onShakeDetected(currentAzimuth, currentPitch)
+}
+```
+
+#### Magnetometer Interference in Vehicles
+
+Vehicle bodies and electric motors can interfere with the magnetometer [^9][^10]. The game counters this problem with two strategies:
+
+1. **Calibration round:** At game start, all players point their phones forward (toward the windshield) for 3 seconds. The Host calculates a shared base offset that is subtracted for all players.
+2. **Relative angles instead of absolute bearings:** The game only works with the *angular difference* between players, not absolute north references. Since all players experience the same electromagnetic interference, errors largely cancel out.
+
+If the magnetometer is completely unreliable (sensor accuracy = `SENSOR_STATUS_UNRELIABLE`), the app falls back to **manual position input**: players tap their approximate seat direction at the start (front-left, back-right, etc.).
+
+### Payload Format
+
+**Client â†’ Host (Input Payload, ~48 bytes):**
+```json
+{
+  "pid": 2,           // Player ID
+  "az": 187.3,        // Azimuth in degrees
+  "pt": 32.1,         // Pitch in degrees
+  "rl": -5.2,         // Roll in degrees
+  "act": "ATTACK",    // IDLE | ATTACK | SHIELD | DODGE | SPECIAL
+  "ts": 1718124523445 // Timestamp (ms since epoch)
+}
+```
+
+**Host â†’ all Clients (Game State, ~120 bytes):**
+```json
+{
+  "seq": 4821,
+  "players": [
+    { "pid": 1, "hp": 85, "status": "SHIELDING" },
+    { "pid": 2, "hp": 60, "status": "ATTACKING", "target": 3 },
+    { "pid": 3, "hp": 100, "status": "IDLE" }
+  ],
+  "events": ["HIT:2â†’3:15", "MISS:1â†’2"],
+  "ts": 1718124523500
+}
+```
+
+### Hit Detection Algorithm (Host)
+
+```kotlin
+fun evaluateAttack(attacker: Player, target: Player, azimuth: Float): HitResult {
+    val requiredBearing = calculateBearing(attacker.position, target.position)
+    val angleDiff = abs(normalizeAngle(azimuth - requiredBearing))
+
+    if (angleDiff > TOLERANCE_DEGREES) return HitResult.MISS  // outside Â±25Â°
+
+    if (target.status == PlayerStatus.SHIELDING) return HitResult.BLOCKED
+
+    val baseDamage = attacker.element.getAttackDamage()
+    val modifier = getElementModifier(attacker.element, target.element)
+    val finalDamage = (baseDamage * modifier).roundToInt()
+
+    return HitResult.HIT(finalDamage)
+}
+
+fun calculateBearing(from: Position, to: Position): Float {
+    // Calculates the angle from `from` to `to` in 2D floor plan
+    val dx = to.x - from.x
+    val dy = to.y - from.y
+    return (Math.toDegrees(atan2(dx.toDouble(), dy.toDouble())).toFloat() + 360f) % 360f
+}
+```
+
+***
+
+## Player Positions: Calibration Modes
+
+### Mode A: Manual Input (recommended for cars/trains)
+
+At startup, a simple seating plan UI is displayed. Each player taps where they are sitting (relative 2D position on a 3Ã—3 grid). The Host calculates the angles between all players from this. Robust, reliable, no sensor dependency.
+
+### Mode B: Calibration Round
+
+All players briefly point in the same direction (e.g., direction of travel). The Host synchronizes compass offsets. Then each player briefly turns toward Player 1, from which the Host learns the relative angles. More involved, but no manual tapping required.
+
+### Mode C: BLE-RSSI Triangulation (experimental)
+
+Uses signal strength between devices as a distance estimate [^11]. Accuracy approximately Â±1â€“2 meters, sufficient as a rough positioning aid. Useful as a supplement to Mode A.
+
+***
+
+## UI/UX Design
+
+### Main Game Screen
+
+```
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚  HP: â–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–ˆâ–‘â–‘  80/100     â”‚
+â”‚  Element: ðŸ”¥ Fire            â”‚
+â”‚                             â”‚
+â”‚         [Compass Ring]      â”‚
+â”‚    N                        â”‚
+â”‚  W  +  E    â† Targeting     â”‚
+â”‚    S                        â”‚
+â”‚  â— Player2 (red)  â€“ 45Â° SW  â”‚
+â”‚  â— Player3 (blue) â€“ 180Â° S  â”‚
+â”‚                             â”‚
+â”‚  [Target: Player2 locked!]  â”‚
+â”‚  â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ â”‚
+â”‚  Status: READY TO ATTACK    â”‚
+â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+```
+
+- The **compass ring** rotates with the phone in real time
+- **Colored dots** mark opponent positions
+- A **red targeting frame** appears when an opponent is within the Â±25Â° cone
+- **Vibration** triggers on hit, incoming attack, and successful shield
+
+### Feedback System
+
+| Event | Visual | Haptic | Audio |
+|---|---|---|---|
+| Hit landed | Screen flashes green | Short buzz | Hit sound |
+| Hit received | Screen flashes red + HP drops | Long buzz | Impact sound |
+| Attack blocked | Shield particle effect | Double buzz | Clang |
+| Opponent knocked out | Explosion overlay | Rhythmic buzz | KO sound |
+| In someone's crosshairs | Pulsing red ring | Light pulse | Warning tone |
+
+***
+
+## Tech Stack & Implementation Plan
+
+### Recommended Stack
+
+| Component | Technology | Rationale |
+|---|---|---|
+| Language | Kotlin | Native Android, best sensor API support |
+| UI | Jetpack Compose + Canvas | Compass ring as Custom Canvas, rest in Compose |
+| Networking | Nearby Connections API (Google Play Services) | Offline P2P, BLE+WiFi, easy integration [^4] |
+| Sensors | Android SensorManager | TYPE_ROTATION_VECTOR [^7] + Accelerometer |
+| Build | Gradle + Android Studio | Standard toolchain |
+| Min SDK | API 26 (Android 8.0) | Nearby Connections requirement |
+
+### Phase Plan
+
+#### Phase 1: Foundation (Weekend 1, ~8h)
+- [ ] Nearby Connections setup: establish Host/Client connection [^5]
+- [ ] Basic compass screen with live-rotating ring
+- [ ] Define payload format + send/receive
+- [ ] Manual position input (Mode A)
+
+#### Phase 2: Game Logic (Weekend 2, ~10h)
+- [ ] Tilt/shake gesture detection
+- [ ] Hit detection algorithm on Host
+- [ ] HP system + game state sync
+- [ ] Shield and dodge mechanics
+
+#### Phase 3: UX & Polish (Weekend 3, ~8h)
+- [ ] Vibration feedback via `Vibrator`/`VibrationEffect`
+- [ ] Element system + damage multipliers
+- [ ] Lobby screen + matchmaking flow
+- [ ] Calibration round (Mode B)
+
+#### Phase 4: Testing & Tuning (ongoing)
+- [ ] Extensive in-vehicle and train testing
+- [ ] Balance tolerance angles and damage values
+- [ ] Harden magnetometer fallback behavior
+
+***
+
+## Known Risks & Mitigations
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| Magnetometer interference in car | Medium | Mode A (manual input) as reliable fallback [^9][^10] |
+| Nearby Connections discovery too slow | Low | Connect once at start, keep session open throughout [^6] |
+| Inconsistent BLE in moving train | Low | BYTES payloads are small; Nearby auto-upgrades to WiFi Direct when available [^12] |
+| Different coordinate systems per phone orientation | Medium | Implement `remapCoordinateSystem()` for all device orientations [^8][^13] |
+| Sensor accuracy warning (SENSOR_STATUS_UNRELIABLE) | Low | Check at game start, prompt user to perform figure-8 calibration [^14] |
+
+***
+
+## Extension Ideas
+
+- **Spectator Mode:** Observers see the direction arrows of all players live
+- **Power-Ups:** Randomly appearing bonuses (e.g., "Firewall: next attack hits from any direction") collected by quick shake
+- **Campaign Mode:** One player acts as Boss, all others cooperate against them
+- **Sound Spatialization:** Sounds come from the opponent's direction (via stereo panning)
+- **AR Overlay:** Camera view with AR markers for opponent positions (requires camera permission)
+
+***
+
+## Summary
+
+Compass Duel combines **physical interaction** (compass orientation, tilt gestures), **offline P2P networking** (Nearby Connections), and **tactical gameplay** (elements, shield, dodge) into a game explicitly designed for mobile use in moving vehicles. The biggest technical challenge â€” magnetometer interference â€” is mitigated by robust fallback strategies. A first playable prototype is realistically achievable in 2â€“3 weekends.
+
+---
+
+## References
+
+1. [SensorManager.GetOrientation(Single[], Single[]) Method (Android ...](https://learn.microsoft.com/en-us/dotnet/api/android.hardware.sensormanager.getorientation?view=net-android-35.0) - Computes the device's orientation based on the rotation matrix. When it returns, the array values ar...
+
+2. [Android SensorManager strange how to remapCoordinateSystem](https://stackoverflow.com/questions/18782829/android-sensormanager-strange-how-to-remapcoordinatesystem) - API Demos -> Graphics -> Compass It works properly only, until you don't change the device natural o...
+
+3. [PaperUsing Bluetooth on Android Devices to Implement Real-Time Multiplayer Games](https://www.slideshare.net/slideshow/paperusing-bluetooth-on-android-devices-to-implement-realtime-multiplayer-games/15720444) - The document discusses a study conducted by undergraduate computer science students to research the ...
+
+4. [Nearby Connections - Google for Developers](https://developers.google.com/nearby/overview)
+
+5. [GitHub - riontech-xten/NearByConnectionAPI: P2P_STAR: NearBy Connection API sample code of persistence connection across the activities with chat implementation](https://github.com/riontech-xten/NearByConnectionAPI) - P2P_STAR: NearBy Connection API sample code of persistence connection across the activities with cha...
+
+6. [How can I speed up Nearby Connections API discovery?](https://stackoverflow.com/questions/52825617/how-can-i-speed-up-nearby-connections-api-discovery) - Unfortunately, the best you can do is to try to connect in one direction. That should lower the conn...
+
+7. [Difference between Sensor.TYPE_ROTATION_VECTOR and getOrientation by combining TYPE_ACCELEROMETER and TYPE_MAGNETIC_FIELD](https://stackoverflow.com/questions/37531143/difference-between-sensor-type-rotation-vector-and-getorientation-by-combining-t) - I'm developing an application which steers a RC Car according to the actual position of a mobile pho...
+
+8. [SensorManager.RemapCoordinateSystem(Single[], Axis ...](https://learn.microsoft.com/en-us/dotnet/api/android.hardware.sensormanager.remapcoordinatesystem?view=net-android-35.0) - Rotates the supplied rotation matrix so it is expressed in a different coordinate system.
+
+9. [Magnetometers, accelerometers, and how to calibrate them on your ...](https://stonekick.com/blog/magnometers-accelerometers-and-calibrating-your-android-device.html) - How to calibrate the accelerometer and magnetometer sensors on your phone.
+
+10. [Smartphone Compass Inaccurate? Here's How to Fix It](https://eathealthy365.com/your-ultimate-guide-to-smartphone-compass-accuracy-issues/) - Is your smartphone compass unreliable? Learn why it fails from magnetic interference and get step-by...
+
+11. [Distance Calculations - Android Beacon Libraryaltbeacon.github.io â€º android-beacon-library â€º distance-calculations](https://altbeacon.github.io/android-beacon-library/distance-calculations.html) - Android Beacon Library : An Android library providing APIs to interact with Beacons
+
+12. [Android Nearby Connection send payload partially wifi aware and bluetooth](https://stackoverflow.com/questions/71890294/android-nearby-connection-send-payload-partially-wifi-aware-and-bluetooth) - I'm sending image payload between two devices using P2P_POINT_TO_POINT (STAR too and every payload t...
+
+13. [Remapping sensor coordinates](https://stackoverflow.com/questions/10918948/remapping-sensor-coordinates/17813154) - What I want to happen, is to remap the coordinate system, when the phone is turned away from it's "n...
+
+14. [How to Calibrate the Compass on Android to Improve Device](https://smartupworld.com/how-to-calibrate-the-compass-on-android-to-improve-device/) - Modern Android smartphones come equipped with a variety of sensors, one of which is the magnetometer...
