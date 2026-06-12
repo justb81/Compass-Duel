@@ -1,8 +1,12 @@
 [versions]
 agp = "9.2.1"
 # Kotlin is intentionally held at 2.3.21 (latest 2.3.x). Do NOT bump to 2.4.0
-# yet: Kotlin 2.4.0 changed default module names to "{group}:{project_name}",
-# whose colon breaks KSP code generation for Hilt/Dagger (google/ksp#2964, open).
+# yet: the toolchain has no 2.4.0-compatible releases. KSP's latest is 2.3.9
+# (targets Kotlin 2.3.x) and Dagger/Hilt's latest is 2.59.2, which bundles
+# kotlin-metadata-jvm 2.2.20 and rejects Kotlin 2.4.0 class metadata in the
+# hiltJavaCompile step ("Provided Metadata instance has version 2.4.0, while
+# maximum supported version is 2.3.0"). Bump only once KSP and Dagger/Hilt ship
+# 2.4.0-compatible releases (the Dependabot 2.4.0 bump is ignored until then).
 # The compose-compiler and kotlin-serialization plugins track this version.
 kotlin = "2.3.21"
 ksp = "2.3.9"
