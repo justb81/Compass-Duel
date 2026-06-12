@@ -7,11 +7,11 @@ import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.engine.GameEngine
 import com.justb81.compassduel.game.engine.KidsRuleSet
 import com.justb81.compassduel.game.engine.ModeRuleSet
+import com.justb81.compassduel.game.engine.RoundOutcome
 import com.justb81.compassduel.game.engine.StandardRuleSet
-import com.justb81.compassduel.game.kids.KidsRoundStats
-import com.justb81.compassduel.game.kids.assignAwards
 import com.justb81.compassduel.game.standard.MatchScore
 import com.justb81.compassduel.net.ConnectionEvent
+import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.GameSnapshot
@@ -84,12 +84,6 @@ fun interface GameEngineFactory {
  * When a round ends without a match winner the host waits [NEXT_ROUND_DELAY_MILLIS] then starts
  * the next round automatically. Kids mode plays a single round.
  *
- * ### Kids mode round-end deviation
- * The engine tracks full [KidsRoundStats] internally in [EngineState.Kids], but [GameSession]
- * cannot access that internal state directly. The [NetMessage.RoundEnd] sent for Kids mode
- * derives [KidsRoundStats] from the snapshot's star counts with `bubbleBlocks = 0` and
- * `sparklesThrown = 0`. This means only the [KidsAward.STAR_CHAMPION] distinction is meaningful
- * via the session; the engine itself uses the full counters for its own computations.
  */
 @Singleton
 class GameSession @Inject constructor(
@@ -127,6 +121,12 @@ class GameSession @Inject constructor(
 
     /** Navigation-level events that drive screen transitions. */
     val sessionEvents: SharedFlow<SessionEvent> = _sessionEvents.asSharedFlow()
+
+    /**
+     * Endpoints discovered during [joinLobby]; backed directly by the transport.
+     * Clients observe this to populate the "nearby hosts" list.
+     */
+    val discoveredEndpoints: StateFlow<List<DiscoveredEndpoint>> = transport.discoveredEndpoints
 
     // ---------------------------------------------------------------------------
     // Private session state (host only unless noted)
@@ -529,21 +529,15 @@ class GameSession @Inject constructor(
     }
 
     private fun buildRoundEnd(mode: GameMode): NetMessage.RoundEnd? {
-        val snap = _snapshot.value ?: return null
+        val outcome = engine?.roundOutcome() ?: return null
         return when (mode) {
-            GameMode.STANDARD -> buildStandardRoundEnd(snap)
-            GameMode.KIDS -> buildKidsRoundEnd(snap)
+            GameMode.STANDARD -> buildStandardRoundEnd(outcome)
+            GameMode.KIDS -> buildKidsRoundEnd(outcome)
         }
     }
 
-    private fun buildStandardRoundEnd(snap: GameSnapshot): NetMessage.RoundEnd {
-        val sortedByHp = snap.players.sortedByDescending { it.hp }
-        val winnerId = when {
-            sortedByHp.isEmpty() -> null
-            sortedByHp.size == 1 -> sortedByHp[0].id
-            sortedByHp[0].hp != sortedByHp[1].hp -> sortedByHp[0].id
-            else -> null
-        }
+    private fun buildStandardRoundEnd(outcome: RoundOutcome): NetMessage.RoundEnd {
+        val winnerId = (outcome as? RoundOutcome.StandardWinner)?.winnerId
         matchScore = matchScore.recordRoundWin(winnerId)
         return NetMessage.RoundEnd(
             roundWinnerId = winnerId,
@@ -553,19 +547,16 @@ class GameSession @Inject constructor(
     }
 
     /**
-     * Builds a Kids Mode [NetMessage.RoundEnd] from snapshot star counts.
-     *
-     * Note: [KidsRoundStats.bubbleBlocks] and [KidsRoundStats.sparklesThrown] are derived
-     * from the engine's internal [EngineState.Kids.stats], which is not accessible here.
-     * These fields default to 0; only [KidsAward.STAR_CHAMPION] is meaningful via the session.
-     * See class KDoc for the full deviation note.
+     * Builds a Kids Mode [NetMessage.RoundEnd] from the engine's authoritative
+     * [RoundOutcome.KidsOutcome], which carries full per-player stats
+     * (including [com.justb81.compassduel.game.kids.KidsRoundStats.bubbleBlocks]
+     * and [com.justb81.compassduel.game.kids.KidsRoundStats.sparklesThrown]) accumulated
+     * by [com.justb81.compassduel.game.engine.KidsRuleSet] during the round.
      */
-    private fun buildKidsRoundEnd(snap: GameSnapshot): NetMessage.RoundEnd {
-        val stats = snap.players.map { p ->
-            KidsRoundStats(playerId = p.id, stars = p.stars, bubbleBlocks = 0, sparklesThrown = 0)
-        }
-        val awards = assignAwards(stats)
-        return NetMessage.RoundEnd(kidsAwards = awards, kidsStats = stats)
+    private fun buildKidsRoundEnd(outcome: RoundOutcome): NetMessage.RoundEnd {
+        val kidsOutcome = outcome as? RoundOutcome.KidsOutcome ?: return NetMessage.RoundEnd()
+        val statsList = kidsOutcome.stats.values.toList()
+        return NetMessage.RoundEnd(kidsAwards = kidsOutcome.awards, kidsStats = statsList)
     }
 
     private fun feedInputToEngine(input: NetMessage.PlayerInput) {

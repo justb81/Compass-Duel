@@ -337,6 +337,15 @@ class GameEngine(
         }
     }
 
+    /**
+     * Returns the authoritative outcome of the current round, or null when the round
+     * has not yet ended.
+     *
+     * Only meaningful once [snapshots] has emitted a snapshot with
+     * [com.justb81.compassduel.net.protocol.RoundPhase.ROUND_OVER].
+     */
+    fun roundOutcome(): RoundOutcome? = engineState?.let { rules.roundOutcome(it) }
+
     /** Stops the tick loop and cancels the round. */
     fun stop() {
         tickJob?.cancel()

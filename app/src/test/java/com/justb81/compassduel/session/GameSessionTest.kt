@@ -4,7 +4,10 @@ import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.engine.GameEngine
 import com.justb81.compassduel.game.engine.ModeRuleSet
+import com.justb81.compassduel.game.engine.RoundOutcome
 import com.justb81.compassduel.game.engine.StandardRuleSet
+import com.justb81.compassduel.game.kids.KidsAward
+import com.justb81.compassduel.game.kids.KidsRoundStats
 import com.justb81.compassduel.net.ConnectionEvent
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.MessageTransport
@@ -19,6 +22,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -110,6 +114,20 @@ private class FakeTransport : MessageTransport {
  */
 private class NoOpEngine(rules: ModeRuleSet, clock: GameClock, scope: CoroutineScope) :
     GameEngine(rules, clock, scope)
+
+/**
+ * [GameEngine] stand-in that returns a pre-configured [RoundOutcome] from [roundOutcome],
+ * allowing tests to verify that [GameSession] uses the engine outcome rather than
+ * deriving stats from the snapshot.
+ */
+private class StubEngine(
+    rules: ModeRuleSet,
+    clock: GameClock,
+    scope: CoroutineScope,
+    private val stubbedOutcome: RoundOutcome,
+) : GameEngine(rules, clock, scope) {
+    override fun roundOutcome(): RoundOutcome = stubbedOutcome
+}
 
 class GameSessionTest {
 
@@ -403,6 +421,76 @@ class GameSessionTest {
         advanceUntilIdle()
 
         assertEquals(SessionEvent.PeerLost, eventsDeferred.await())
+    }
+
+    // ---------------------------------------------------------------------------
+    // Kids round-end outcome wiring
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `kids round end carries non-zero bubbleBlocks and sparklesThrown from engine outcome`() = testScope.runTest {
+        val aliceId = 1
+        val bobId = 2
+        val kidsStats = mapOf(
+            aliceId to KidsRoundStats(playerId = aliceId, stars = 3, bubbleBlocks = 2, sparklesThrown = 5),
+            bobId to KidsRoundStats(playerId = bobId, stars = 1, bubbleBlocks = 0, sparklesThrown = 3),
+        )
+        val kidsAwards = mapOf(aliceId to KidsAward.STAR_CHAMPION, bobId to KidsAward.SUPER_SPARKLER)
+        val stubbedOutcome = RoundOutcome.KidsOutcome(stats = kidsStats, awards = kidsAwards)
+
+        val session = buildSession(
+            engineFactory = GameEngineFactory { rules, clk, scp ->
+                StubEngine(rules, clk, scp, stubbedOutcome)
+            },
+        )
+
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        advanceUntilIdle()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        advanceUntilIdle()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        advanceUntilIdle()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        advanceUntilIdle()
+
+        session.startMatch()
+        advanceUntilIdle()
+
+        // Advance fake clock past countdown (3 s) then past round duration (60 s),
+        // and advance the coroutine scheduler by the same amount so the tick loop runs.
+        val countdownMs = 3_100L
+        val roundMs = 60_100L
+        clock.advance(countdownMs)
+        advanceTimeBy(countdownMs)
+        advanceUntilIdle()
+
+        clock.advance(roundMs)
+        advanceTimeBy(roundMs)
+        advanceUntilIdle()
+
+        // Allow the ROUND_END_DELAY_MILLIS (200 ms) to elapse
+        val roundEndDelayMs = 200L
+        clock.advance(roundEndDelayMs)
+        advanceTimeBy(roundEndDelayMs)
+        advanceUntilIdle()
+
+        val roundEnd = session.roundEnd.value
+        assertNotNull(roundEnd)
+        assertNotNull(roundEnd?.kidsStats)
+
+        val aliceStats = roundEnd!!.kidsStats!!.find { it.playerId == aliceId }
+        assertNotNull(aliceStats)
+        assertEquals(2, aliceStats!!.bubbleBlocks)
+        assertEquals(5, aliceStats.sparklesThrown)
+
+        val bobStats = roundEnd.kidsStats!!.find { it.playerId == bobId }
+        assertNotNull(bobStats)
+        assertEquals(3, bobStats!!.sparklesThrown)
     }
 
     // ---------------------------------------------------------------------------
