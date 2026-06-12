@@ -1,0 +1,57 @@
+package com.justb81.compassduel.net
+
+import com.justb81.compassduel.net.protocol.NetMessage
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/** A player endpoint discovered during [startDiscovery]. */
+data class DiscoveredEndpoint(val endpointId: String, val name: String)
+
+/** Events emitted when a connection is established or dropped. */
+sealed interface ConnectionEvent {
+    /** A peer successfully connected. */
+    data class Connected(val endpointId: String, val peerName: String) : ConnectionEvent
+
+    /** A peer disconnected or was lost. */
+    data class Disconnected(val endpointId: String) : ConnectionEvent
+}
+
+/**
+ * Abstraction over the Nearby Connections transport so [com.justb81.compassduel.session.GameSession]
+ * can be tested against an in-memory fake transport without Play Services.
+ */
+interface MessageTransport {
+
+    /** Emits [ConnectionEvent] whenever a peer connects or disconnects. */
+    val connectionEvents: SharedFlow<ConnectionEvent>
+
+    /** Endpoints discovered during [startDiscovery]; cleared when discovery stops. */
+    val discoveredEndpoints: StateFlow<List<DiscoveredEndpoint>>
+
+    /** Decoded [NetMessage] payloads received from any endpoint. */
+    val incomingMessages: SharedFlow<Pair<String, NetMessage>>
+
+    /** Ids of all currently connected endpoints. */
+    val connectedEndpointIds: StateFlow<Set<String>>
+
+    /** Start advertising so clients can discover this device. */
+    fun startAdvertising(localName: String)
+
+    /** Start scanning for advertising peers. */
+    fun startDiscovery()
+
+    /** Stop discovery scan (advertising continues). */
+    fun stopDiscovery()
+
+    /** Request a connection to [endpointId]. */
+    fun requestConnection(endpointId: String, localName: String)
+
+    /** Send [message] to a single [endpointId]. */
+    fun send(endpointId: String, message: NetMessage)
+
+    /** Send [message] to all currently connected endpoints. */
+    fun broadcast(message: NetMessage)
+
+    /** Stop advertising, discovery, and all connections. */
+    fun stopAll()
+}
