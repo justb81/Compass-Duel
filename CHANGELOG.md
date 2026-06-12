@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/justb81/Compass-Duel/compare/v0.1.2...v0.2.0) (2026-06-12)
+
+
+### Miscellaneous Chores
+
+* release 0.2.0 ([#9](https://github.com/justb81/Compass-Duel/issues/9)) ([572da2e](https://github.com/justb81/Compass-Duel/commit/572da2e3c68b4a31ff10ee184aace4e76cc050b3))
+
 ## [0.1.2](https://github.com/justb81/Compass-Duel/compare/v0.1.1...v0.1.2) (2026-06-12)
 
 
