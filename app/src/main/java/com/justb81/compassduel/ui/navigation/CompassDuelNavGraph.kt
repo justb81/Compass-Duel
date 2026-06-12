@@ -107,7 +107,11 @@ fun CompassDuelNavGraph(navController: NavHostController) {
             GameScreen()
         }
         composable<ResultsRoute> {
-            ResultsScreen()
+            ResultsScreen(
+                onNavigateHome = {
+                    navController.popBackStack(HomeRoute, inclusive = false)
+                },
+            )
         }
     }
 }
