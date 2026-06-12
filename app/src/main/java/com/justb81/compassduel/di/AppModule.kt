@@ -7,8 +7,10 @@ import android.os.VibratorManager
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import com.justb81.compassduel.game.engine.GameClock
+import com.justb81.compassduel.game.engine.GameEngine
 import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.NearbyConnectionManager
+import com.justb81.compassduel.session.GameEngineFactory
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -70,5 +72,10 @@ abstract class AppModule {
         @ApplicationScope
         fun provideApplicationScope(): CoroutineScope =
             CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+        @Provides
+        @Singleton
+        fun provideGameEngineFactory(): GameEngineFactory =
+            GameEngineFactory { rules, clock, scope -> GameEngine(rules, clock, scope) }
     }
 }
