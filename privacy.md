@@ -52,4 +52,4 @@ location with a revised "Last updated" date.
 ## Contact
 
 For any questions about this privacy policy, contact:
-**bastian.rang@cplace.com**
+**justb81@gmail.com**
