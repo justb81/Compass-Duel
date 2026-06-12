@@ -9,3 +9,14 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+    ignore:
+      # Kotlin is intentionally pinned to the 2.3.x line. As of 2026-06 the
+      # toolchain has no Kotlin 2.4.0-compatible releases: KSP's latest is 2.3.9
+      # (targets Kotlin 2.3.x) and Dagger/Hilt's latest is 2.59.2, which bundles
+      # kotlin-metadata-jvm 2.2.20 and rejects Kotlin 2.4.0 class metadata
+      # ("maximum supported version is 2.3.0") in the hiltJavaCompile step.
+      # Drop these rules once KSP and Dagger/Hilt ship 2.4.0-compatible releases.
+      - dependency-name: "org.jetbrains.kotlin:*"
+        versions: [">= 2.4.0"]
+      - dependency-name: "org.jetbrains.kotlin.plugin.*"
+        versions: [">= 2.4.0"]
