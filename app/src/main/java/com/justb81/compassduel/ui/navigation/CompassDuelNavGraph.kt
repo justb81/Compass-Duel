@@ -17,8 +17,10 @@ import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.justb81.compassduel.R
 import com.justb81.compassduel.session.SessionEvent
+import com.justb81.compassduel.ui.screens.game.GameScreen
 import com.justb81.compassduel.ui.screens.home.HomeScreen
 import com.justb81.compassduel.ui.screens.lobby.LobbyScreen
+import com.justb81.compassduel.ui.screens.results.ResultsScreen
 import kotlinx.serialization.Serializable
 
 // ---------------------------------------------------------------------------
@@ -33,11 +35,11 @@ data object HomeRoute
 @Serializable
 data class LobbyRoute(val isHost: Boolean)
 
-/** Game screen (placeholder — implemented in a later milestone). */
+/** Game screen: active combat / star-catching phase. */
 @Serializable
 data object GameRoute
 
-/** Results screen (placeholder — implemented in a later milestone). */
+/** Results screen: round and match results, rematch / leave actions. */
 @Serializable
 data object ResultsRoute
 
@@ -102,12 +104,10 @@ fun CompassDuelNavGraph(navController: NavHostController) {
             LobbyScreen(isHost = route.isHost)
         }
         composable<GameRoute> {
-            // Game screen — implemented in a later milestone.
-            GameScreenPlaceholder()
+            GameScreen()
         }
         composable<ResultsRoute> {
-            // Results screen — implemented in a later milestone.
-            ResultsScreenPlaceholder()
+            ResultsScreen()
         }
     }
 }
@@ -126,14 +126,3 @@ private fun PeerLostDialog(onDismiss: () -> Unit) {
     )
 }
 
-/** Temporary placeholder shown on the game route until the game screen milestone is implemented. */
-@Composable
-private fun GameScreenPlaceholder() {
-    Text(text = stringResource(R.string.placeholder_game_screen))
-}
-
-/** Temporary placeholder shown on the results route until the results screen milestone is implemented. */
-@Composable
-private fun ResultsScreenPlaceholder() {
-    Text(text = stringResource(R.string.placeholder_results_screen))
-}

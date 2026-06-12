@@ -67,4 +67,31 @@
     <string name="player_badge_not_ready">Not ready</string>
     <string name="player_badge_seat">Seat %1$d</string>
     <string name="player_badge_no_seat">No seat</string>
+
+    <!-- Game screen -->
+    <string name="game_countdown_instruction">Hold your phone flat and point it forward</string>
+    <string name="game_round_over">Round over…</string>
+    <string name="game_status_shielding">Shielding</string>
+    <string name="game_status_resting">Resting…</string>
+    <string name="game_status_eliminated">Eliminated — spectating</string>
+    <string name="game_status_ready">Ready</string>
+    <string name="game_eliminated_spectating">You have been eliminated.\nWatch the remaining players.</string>
+    <string name="game_timer_label">%1$ds</string>
+    <string name="game_round_wins">Wins: %1$d</string>
+
+    <!-- Results screen -->
+    <string name="results_title">Round Results</string>
+    <string name="results_round_winner">%1$s wins the round!</string>
+    <string name="results_round_draw">Round draw!</string>
+    <string name="results_match_winner">🏆 %1$s wins the match!</string>
+    <string name="results_scores_header">Match Score</string>
+    <string name="results_wins_count">%1$d win(s)</string>
+    <string name="results_kids_celebration">Amazing round, everyone! 🌟</string>
+    <string name="results_award_star_champion">Star Champion</string>
+    <string name="results_award_bubble_hero">Bubble Hero</string>
+    <string name="results_award_busy_bee">Busy Bee</string>
+    <string name="results_award_super_sparkler">Super Sparkler</string>
+    <string name="results_rematch_button">Rematch</string>
+    <string name="results_leave_button">Leave</string>
+    <string name="results_waiting_for_host">Waiting for the host to start a rematch…</string>
 </resources>

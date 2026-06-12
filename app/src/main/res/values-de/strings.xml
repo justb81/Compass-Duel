@@ -67,4 +67,31 @@
     <string name="player_badge_not_ready">Nicht bereit</string>
     <string name="player_badge_seat">Platz %1$d</string>
     <string name="player_badge_no_seat">Kein Platz</string>
+
+    <!-- Game screen -->
+    <string name="game_countdown_instruction">Halte dein Handy flach und zeige nach vorne</string>
+    <string name="game_round_over">Runde beendet …</string>
+    <string name="game_status_shielding">Schild aktiv</string>
+    <string name="game_status_resting">Ausruhen …</string>
+    <string name="game_status_eliminated">Ausgeschieden – zuschauen</string>
+    <string name="game_status_ready">Bereit</string>
+    <string name="game_eliminated_spectating">Du wurdest ausgeschieden.\nBeobachte die verbleibenden Spieler.</string>
+    <string name="game_timer_label">%1$ds</string>
+    <string name="game_round_wins">Siege: %1$d</string>
+
+    <!-- Results screen -->
+    <string name="results_title">Rundenergebnis</string>
+    <string name="results_round_winner">%1$s gewinnt die Runde!</string>
+    <string name="results_round_draw">Unentschieden!</string>
+    <string name="results_match_winner">🏆 %1$s gewinnt das Match!</string>
+    <string name="results_scores_header">Match-Punktestand</string>
+    <string name="results_wins_count">%1$d Sieg(e)</string>
+    <string name="results_kids_celebration">Tolle Runde, alle! 🌟</string>
+    <string name="results_award_star_champion">Sternen-Champion</string>
+    <string name="results_award_bubble_hero">Blasen-Held</string>
+    <string name="results_award_busy_bee">Fleißige Biene</string>
+    <string name="results_award_super_sparkler">Super-Funkler</string>
+    <string name="results_rematch_button">Revanche</string>
+    <string name="results_leave_button">Verlassen</string>
+    <string name="results_waiting_for_host">Warte auf den Host für eine Revanche …</string>
 </resources>
