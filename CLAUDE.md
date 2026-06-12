@@ -27,14 +27,27 @@ Compass-Duel/
 │   ├── proguard-rules.pro
 │   └── src/main/java/com/justb81/compassduel/
 │       ├── CompassDuelApp.kt   @HiltAndroidApp entry point
+│       ├── di/                 Hilt AppModule — Android framework + engine singleton bindings
 │       ├── game/               Pure game domain — Element matchups, Bearing/hit math (unit-tested)
 │       │   ├── kids/           Kids Mode domain — catch evaluation, star scoring, awards
 │       │   ├── standard/       Standard Mode domain — DuelPlayer, AttackResult, MatchScore
 │       │   ├── gesture/        Pure gesture classifier — MotionSample, GestureClassifier
 │       │   └── engine/         Host-authoritative game engine — GameEngine, ModeRuleSet, rule sets
-│       ├── net/
+│       ├── net/                NearbyConnectionManager (MessageTransport impl)
 │       │   └── protocol/       Nearby payload schema — NetMessage sealed hierarchy, MessageCodec
-│       └── ui/                 MainActivity (@AndroidEntryPoint), Compose theme
+│       │                       (canonical source for all on-wire message types)
+│       ├── sensor/             OrientationSensor, ShakeDetector, AimCalibration, InputPipeline
+│       ├── session/            GameSession facade — host/client roles, SessionEvent, SessionRole
+│       ├── haptics/            HapticFeedback — mode-aware vibration wrapper (Standard / Kids)
+│       └── ui/
+│           ├── navigation/     CompassDuelNavGraph — type-safe routes, AppViewModel, SessionEvent fan-out
+│           ├── permissions/    NearbyPermissionsGate — Compose runtime-permission flow
+│           ├── components/     CompassRing (Canvas), PlayerBadge, SeatGrid
+│           └── screens/
+│               ├── home/       HomeScreen + HomeViewModel
+│               ├── lobby/      LobbyScreen + LobbyViewModel
+│               ├── game/       GameScreen + GameViewModel (COUNTDOWN / PLAYING / ROUND_OVER)
+│               └── results/    ResultsScreen + ResultsViewModel (Standard score + Kids awards)
 ├── build-logic/convention/     Included build with two convention plugins:
 │       compassduel.android.application  compileSdk/Java 17/Hilt/KSP/signing/lint/test deps
 │       compassduel.detekt               detekt wiring (shared ruleset + per-module baseline)
