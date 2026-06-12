@@ -1,5 +1,7 @@
 package com.justb81.compassduel.game
 
+import kotlinx.serialization.Serializable
+
 /**
  * The four playable elements and their classic strength/weakness relationships.
  *
@@ -10,6 +12,7 @@ package com.justb81.compassduel.game
  * | Earth     | Lightning      | Fire         |
  * | Lightning | Water          | Earth        |
  */
+@Serializable
 enum class Element {
     FIRE,
     WATER,

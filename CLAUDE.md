@@ -28,7 +28,12 @@ Compass-Duel/
 │   └── src/main/java/com/justb81/compassduel/
 │       ├── CompassDuelApp.kt   @HiltAndroidApp entry point
 │       ├── game/               Pure game domain — Element matchups, Bearing/hit math (unit-tested)
-│       │   └── kids/           Kids Mode domain — catch evaluation, star scoring, awards
+│       │   ├── kids/           Kids Mode domain — catch evaluation, star scoring, awards
+│       │   ├── standard/       Standard Mode domain — DuelPlayer, AttackResult, MatchScore
+│       │   ├── gesture/        Pure gesture classifier — MotionSample, GestureClassifier
+│       │   └── engine/         Host-authoritative game engine — GameEngine, ModeRuleSet, rule sets
+│       ├── net/
+│       │   └── protocol/       Nearby payload schema — NetMessage sealed hierarchy, MessageCodec
 │       └── ui/                 MainActivity (@AndroidEntryPoint), Compose theme
 ├── build-logic/convention/     Included build with two convention plugins:
 │       compassduel.android.application  compileSdk/Java 17/Hilt/KSP/signing/lint/test deps
