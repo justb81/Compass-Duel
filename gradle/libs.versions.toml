@@ -4,7 +4,7 @@ agp = "9.2.1"
 # yet: Kotlin 2.4.0 changed default module names to "{group}:{project_name}",
 # whose colon breaks KSP code generation for Hilt/Dagger (google/ksp#2964, open).
 # The compose-compiler and kotlin-serialization plugins track this version.
-kotlin = "2.3.21"
+kotlin = "2.4.0"
 ksp = "2.3.9"
 hilt = "2.59.2"
 compose-bom = "2026.05.01"
