@@ -13,6 +13,11 @@ Connections API** (P2P_STAR topology: one Host + N Clients). The Host is
 authoritative for hit detection — clients never decide hits, which prevents
 cheating. See `docs/game-spec.md` for the full concept and technical spec.
 
+A child-friendly variant, **Kids Mode ("Star Catchers")**, replaces combat
+with magic tag: no HP/damage/elimination, stars only go up, every player gets
+an end-of-round award. Spec: `docs/kids-mode-spec.md`; pure domain rules in
+`app/.../game/kids/` (unit-tested).
+
 ## Repository Structure
 
 ```
@@ -23,12 +28,13 @@ Compass-Duel/
 │   └── src/main/java/com/justb81/compassduel/
 │       ├── CompassDuelApp.kt   @HiltAndroidApp entry point
 │       ├── game/               Pure game domain — Element matchups, Bearing/hit math (unit-tested)
+│       │   └── kids/           Kids Mode domain — catch evaluation, star scoring, awards
 │       └── ui/                 MainActivity (@AndroidEntryPoint), Compose theme
 ├── build-logic/convention/     Included build with two convention plugins:
 │       compassduel.android.application  compileSdk/Java 17/Hilt/KSP/signing/lint/test deps
 │       compassduel.detekt               detekt wiring (shared ruleset + per-module baseline)
 ├── config/detekt/detekt.yml    Shared detekt ruleset
-├── docs/game-spec.md
+├── docs/                       game-spec.md, kids-mode-spec.md
 ├── scripts/
 │   ├── precommit.sh                  Scoped local mirror of CI checks
 │   └── validate-release-security.py  Validates release.yml signing-secret hygiene

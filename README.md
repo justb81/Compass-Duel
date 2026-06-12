@@ -10,6 +10,10 @@ internet required.
 See [`docs/game-spec.md`](docs/game-spec.md) for the complete game concept and
 technical specification.
 
+For younger players there is **Kids Mode ("Star Catchers")** — a friendly game
+of magic tag with no damage, no elimination and an award for every child. See
+[`docs/kids-mode-spec.md`](docs/kids-mode-spec.md).
+
 ## Tech Stack
 
 - **Language:** Kotlin, JDK 17
@@ -32,11 +36,12 @@ Compass-Duel/
 │   └── src/main/java/com/justb81/compassduel/
 │       ├── CompassDuelApp.kt   Hilt application entry point
 │       ├── game/               Game domain (Element matchups, bearing/hit math)
+│       │   └── kids/           Kids Mode rules (catch evaluation, awards)
 │       └── ui/                 MainActivity, Compose theme & screens
 ├── build-logic/         Gradle convention plugins (included build)
 │   └── convention/      compassduel.android.application + compassduel.detekt
 ├── config/detekt/       Shared detekt ruleset
-├── docs/                game-spec.md
+├── docs/                game-spec.md, kids-mode-spec.md
 ├── scripts/             precommit.sh, validate-release-security.py
 ├── .github/
 │   ├── actions/setup-android-build/   Composite action: checkout + JDK 17 + Gradle
