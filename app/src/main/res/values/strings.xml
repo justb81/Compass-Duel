@@ -1,4 +1,70 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Compass Duel</string>
+
+    <!-- Nearby runtime-permission gate -->
+    <string name="permissions_rationale">Compass Duel needs Bluetooth and Wi-Fi permissions to find and connect to nearby players.</string>
+    <string name="permissions_denied_message">Permissions were denied. Please open app settings and grant Bluetooth and Wi-Fi access to play.</string>
+    <string name="permissions_grant_button">Grant permissions</string>
+    <string name="permissions_open_settings">Open settings</string>
+
+    <!-- Home screen -->
+    <string name="home_player_name_label">Your name</string>
+    <string name="home_mode_standard">Standard</string>
+    <string name="home_mode_kids">Star Catchers</string>
+    <string name="home_host_game">Host game</string>
+    <string name="home_join_game">Join game</string>
+
+    <!-- Peer-lost dialog -->
+    <string name="peer_lost_title">Connection lost</string>
+    <string name="peer_lost_message">The connection to the other device was lost. You have been returned to the home screen.</string>
+    <string name="peer_lost_ok">OK</string>
+
+    <!-- Screen placeholders -->
+    <string name="placeholder_game_screen">Game screen — coming soon</string>
+    <string name="placeholder_results_screen">Results screen — coming soon</string>
+
+    <!-- Lobby screen — shared -->
+    <string name="lobby_title_host">Lobby (Host)</string>
+    <string name="lobby_title_client">Lobby</string>
+    <string name="lobby_players_header">Players</string>
+    <string name="lobby_mode_label">Game mode</string>
+    <string name="lobby_seat_header">Choose a seat</string>
+    <string name="lobby_character_header">Choose your character</string>
+    <string name="lobby_start_button">Start game</string>
+    <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
+    <string name="lobby_start_error_players">Need 2–4 players to start.</string>
+    <string name="lobby_start_error_seats">All players must choose a seat.</string>
+    <string name="lobby_start_error_elements">All players must choose an element.</string>
+    <string name="lobby_start_error_duplicate_seats">Two players cannot share a seat.</string>
+    <string name="lobby_start_error_duplicate_elements">Each player must choose a unique element.</string>
+
+    <!-- Lobby — client discovery -->
+    <string name="lobby_searching">Searching for nearby hosts…</string>
+    <string name="lobby_no_hosts_found">No hosts found yet. Make sure the host has started a game.</string>
+    <string name="lobby_connect_button">Connect</string>
+    <string name="lobby_connected_waiting">Connected — waiting for lobby…</string>
+
+    <!-- Seat grid -->
+    <string name="seat_grid_cell_content_description">Seat %1$d</string>
+    <string name="seat_grid_cell_occupied">Seat %1$d — %2$s</string>
+    <string name="seat_grid_cell_mine">Seat %1$d — you</string>
+
+    <!-- Element picker (Standard mode) -->
+    <string name="element_fire">Fire</string>
+    <string name="element_water">Water</string>
+    <string name="element_earth">Earth</string>
+    <string name="element_lightning">Lightning</string>
+
+    <!-- Sprite picker (Kids mode) -->
+    <string name="sprite_0">Star</string>
+    <string name="sprite_1">Moon</string>
+    <string name="sprite_2">Sun</string>
+    <string name="sprite_3">Comet</string>
+
+    <!-- Player badge -->
+    <string name="player_badge_ready">Ready</string>
+    <string name="player_badge_not_ready">Not ready</string>
+    <string name="player_badge_seat">Seat %1$d</string>
+    <string name="player_badge_no_seat">No seat</string>
 </resources>
