@@ -30,6 +30,11 @@
     <string name="lobby_start_button">Start game</string>
     <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
 
+    <!-- Lobby — transport errors -->
+    <string name="lobby_error_host_failed">Couldn\'t start hosting. Make sure Bluetooth and Wi-Fi are on, then try again.</string>
+    <string name="lobby_error_discovery_failed">Couldn\'t search for hosts. Make sure Bluetooth and Wi-Fi are on.</string>
+    <string name="lobby_error_connect_failed">Couldn\'t connect to the host. Please try again.</string>
+
     <!-- Lobby — client discovery -->
     <string name="lobby_searching">Searching for nearby hosts…</string>
     <string name="lobby_no_hosts_found">No hosts found yet. Make sure the host has started a game.</string>

@@ -59,6 +59,9 @@ class NearbyConnectionManager @Inject constructor(
     private val _connectedEndpointIds = MutableStateFlow<Set<String>>(emptySet())
     override val connectedEndpointIds: StateFlow<Set<String>> = _connectedEndpointIds.asStateFlow()
 
+    private val _transportErrors = MutableSharedFlow<TransportError>(extraBufferCapacity = BUFFER_CAPACITY)
+    override val transportErrors: SharedFlow<TransportError> = _transportErrors.asSharedFlow()
+
     /** Stores peer names captured in onConnectionInitiated so they can be emitted in onConnectionResult. */
     private val pendingPeerNames: MutableMap<String, String> = mutableMapOf()
 
@@ -130,51 +133,99 @@ class NearbyConnectionManager @Inject constructor(
     // MessageTransport API
     // ---------------------------------------------------------------------------
 
+    // Play Services calls can throw synchronously (e.g. SecurityException / ApiException /
+    // IllegalStateException from adapter state or OEM permission quirks) in addition to failing
+    // asynchronously via the returned Task. We guard both paths so a transport failure surfaces
+    // as a [TransportError] instead of crashing the app. Catching the broad boundary exception is
+    // intentional here — this is a thin, untested Play Services shim (see class KDoc).
+
+    @Suppress("TooGenericExceptionCaught")
     override fun startAdvertising(localName: String) {
-        val options = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
-        connectionsClient
-            .startAdvertising(localName, SERVICE_ID, connectionLifecycleCallback, options)
-            .addOnFailureListener { e -> Log.e(TAG, "startAdvertising failed: ${e.message}") }
-    }
-
-    override fun startDiscovery() {
-        val options = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
-        connectionsClient
-            .startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
-            .addOnFailureListener { e -> Log.e(TAG, "startDiscovery failed: ${e.message}") }
-    }
-
-    override fun stopDiscovery() {
-        connectionsClient.stopDiscovery()
-        _discoveredEndpoints.value = emptyList()
-    }
-
-    override fun requestConnection(endpointId: String, localName: String) {
-        connectionsClient
-            .requestConnection(localName, endpointId, connectionLifecycleCallback)
-            .addOnFailureListener { e -> Log.e(TAG, "requestConnection to $endpointId failed: ${e.message}") }
-    }
-
-    override fun send(endpointId: String, message: NetMessage) {
-        val payload = Payload.fromBytes(MessageCodec.encode(message))
-        connectionsClient.sendPayload(endpointId, payload)
-    }
-
-    override fun broadcast(message: NetMessage) {
-        val payload = Payload.fromBytes(MessageCodec.encode(message))
-        val ids = _connectedEndpointIds.value.toList()
-        if (ids.isNotEmpty()) {
-            connectionsClient.sendPayload(ids, payload)
+        try {
+            val options = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
+            connectionsClient
+                .startAdvertising(localName, SERVICE_ID, connectionLifecycleCallback, options)
+                .addOnFailureListener { e -> reportFailure(TransportError.ADVERTISE, "startAdvertising", e) }
+        } catch (e: Exception) {
+            reportFailure(TransportError.ADVERTISE, "startAdvertising", e)
         }
     }
 
+    @Suppress("TooGenericExceptionCaught")
+    override fun startDiscovery() {
+        try {
+            val options = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
+            connectionsClient
+                .startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
+                .addOnFailureListener { e -> reportFailure(TransportError.DISCOVER, "startDiscovery", e) }
+        } catch (e: Exception) {
+            reportFailure(TransportError.DISCOVER, "startDiscovery", e)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override fun stopDiscovery() {
+        try {
+            connectionsClient.stopDiscovery()
+        } catch (e: Exception) {
+            Log.e(TAG, "stopDiscovery failed", e)
+        }
+        _discoveredEndpoints.value = emptyList()
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override fun requestConnection(endpointId: String, localName: String) {
+        try {
+            connectionsClient
+                .requestConnection(localName, endpointId, connectionLifecycleCallback)
+                .addOnFailureListener { e -> reportFailure(TransportError.CONNECT, "requestConnection to $endpointId", e) }
+        } catch (e: Exception) {
+            reportFailure(TransportError.CONNECT, "requestConnection to $endpointId", e)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override fun send(endpointId: String, message: NetMessage) {
+        try {
+            val payload = Payload.fromBytes(MessageCodec.encode(message))
+            connectionsClient.sendPayload(endpointId, payload)
+        } catch (e: Exception) {
+            // Log-only: per-message failures are too granular to surface in the UI.
+            Log.e(TAG, "send to $endpointId failed", e)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    override fun broadcast(message: NetMessage) {
+        try {
+            val payload = Payload.fromBytes(MessageCodec.encode(message))
+            val ids = _connectedEndpointIds.value.toList()
+            if (ids.isNotEmpty()) {
+                connectionsClient.sendPayload(ids, payload)
+            }
+        } catch (e: Exception) {
+            // Log-only: per-message failures are too granular to surface in the UI.
+            Log.e(TAG, "broadcast failed", e)
+        }
+    }
+
+    @Suppress("TooGenericExceptionCaught")
     override fun stopAll() {
-        connectionsClient.stopAllEndpoints()
-        connectionsClient.stopAdvertising()
-        connectionsClient.stopDiscovery()
+        try {
+            connectionsClient.stopAllEndpoints()
+            connectionsClient.stopAdvertising()
+            connectionsClient.stopDiscovery()
+        } catch (e: Exception) {
+            Log.e(TAG, "stopAll failed", e)
+        }
         _connectedEndpointIds.value = emptySet()
         _discoveredEndpoints.value = emptyList()
         pendingPeerNames.clear()
+    }
+
+    private fun reportFailure(error: TransportError, operation: String, cause: Throwable) {
+        Log.e(TAG, "$operation failed: ${cause.message}", cause)
+        _transportErrors.tryEmit(error)
     }
 
     companion object {

@@ -11,6 +11,7 @@ import com.justb81.compassduel.game.kids.KidsRoundStats
 import com.justb81.compassduel.net.ConnectionEvent
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.MessageTransport
+import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import kotlinx.coroutines.CoroutineScope
@@ -68,6 +69,12 @@ private class FakeTransport : MessageTransport {
     private val _connectedEndpointIds = MutableStateFlow<Set<String>>(emptySet())
     override val connectedEndpointIds: StateFlow<Set<String>> = _connectedEndpointIds
 
+    private val _transportErrors = MutableSharedFlow<TransportError>(
+        extraBufferCapacity = BUFFER_CAPACITY,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    override val transportErrors: SharedFlow<TransportError> = _transportErrors
+
     /** All messages sent via [send] or [broadcast], in order. */
     val sentMessages: MutableList<NetMessage> = mutableListOf()
 
@@ -101,6 +108,7 @@ private class FakeTransport : MessageTransport {
     suspend fun emitIncoming(endpointId: String, message: NetMessage) {
         _incomingMessages.emit(endpointId to message)
     }
+    suspend fun emitTransportError(error: TransportError) { _transportErrors.emit(error) }
 
     companion object {
         private const val BUFFER_CAPACITY = 64
@@ -326,6 +334,17 @@ class GameSessionTest {
             transport.emitIncoming("host-ep", NetMessage.Rematch)
             yield()
             assertEquals(SessionEvent.RematchRequested, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `transport errors are re-exposed on the session`() = testScope.runTest {
+        val session = buildSession()
+
+        session.transportErrors.test {
+            transport.emitTransportError(TransportError.ADVERTISE)
+            assertEquals(TransportError.ADVERTISE, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
     }

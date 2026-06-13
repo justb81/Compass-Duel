@@ -1,9 +1,12 @@
 package com.justb81.compassduel.ui.screens.lobby
 
+import androidx.annotation.StringRes
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.justb81.compassduel.R
 import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.net.DiscoveredEndpoint
+import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.session.GameSession
@@ -14,6 +17,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** UI state for the lobby screen. */
@@ -30,6 +34,8 @@ data class LobbyUiState(
     val isSearching: Boolean = false,
     /** Validation error to surface via Snackbar (host only; null = no error). */
     val startError: String? = null,
+    /** String resource for a transport failure to surface via Snackbar (null = no error). */
+    @StringRes val transportErrorRes: Int? = null,
 )
 
 /**
@@ -46,13 +52,25 @@ class LobbyViewModel @Inject constructor(
 ) : ViewModel() {
 
     private val _startError = MutableStateFlow<String?>(null)
+    private val _transportErrorRes = MutableStateFlow<Int?>(null)
+
+    init {
+        // Surface transport failures (e.g. advertising/discovery could not start) as a
+        // user-facing message instead of letting the underlying call crash the app.
+        viewModelScope.launch {
+            session.transportErrors.collect { error ->
+                _transportErrorRes.value = error.toMessageRes()
+            }
+        }
+    }
 
     /** Combined UI state observed by [LobbyScreen]. */
     val uiState: StateFlow<LobbyUiState> = combine(
         session.lobby,
         session.discoveredEndpoints,
         _startError,
-    ) { lobby, endpoints, startError ->
+        _transportErrorRes,
+    ) { lobby, endpoints, startError, transportErrorRes ->
         if (lobby != null) {
             LobbyUiState(
                 players = lobby.players,
@@ -61,12 +79,14 @@ class LobbyViewModel @Inject constructor(
                 discoveredEndpoints = emptyList(),
                 isSearching = false,
                 startError = startError,
+                transportErrorRes = transportErrorRes,
             )
         } else {
             LobbyUiState(
                 discoveredEndpoints = endpoints,
                 isSearching = true,
                 startError = startError,
+                transportErrorRes = transportErrorRes,
             )
         }
     }.stateIn(
@@ -129,6 +149,18 @@ class LobbyViewModel @Inject constructor(
     /** Clears the start-error message (e.g. after the Snackbar is dismissed). */
     fun clearStartError() {
         _startError.value = null
+    }
+
+    /** Clears the transport-error message (e.g. after the Snackbar is shown). */
+    fun clearTransportError() {
+        _transportErrorRes.value = null
+    }
+
+    @StringRes
+    private fun TransportError.toMessageRes(): Int = when (this) {
+        TransportError.ADVERTISE -> R.string.lobby_error_host_failed
+        TransportError.DISCOVER -> R.string.lobby_error_discovery_failed
+        TransportError.CONNECT -> R.string.lobby_error_connect_failed
     }
 
     companion object {
