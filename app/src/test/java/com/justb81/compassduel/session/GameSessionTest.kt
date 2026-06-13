@@ -144,7 +144,9 @@ class GameSessionTest {
             transport = transport,
             clock = clock,
             engineFactory = factory,
-            scope = testScope,
+            // backgroundScope: the session's long-lived collectors are cancelled with the
+            // test instead of tripping runTest's UncompletedCoroutinesError leak check.
+            scope = testScope.backgroundScope,
         )
     }
 
