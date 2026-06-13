@@ -30,8 +30,13 @@ class MessageCodecTest {
     }
 
     @Test
-    fun `SeatChosen round-trips correctly`() {
-        assertRoundTrip(NetMessage.SeatChosen(cell = 4))
+    fun `Greeting round-trips correctly`() {
+        assertRoundTrip(NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 137.5f))
+    }
+
+    @Test
+    fun `PlayerMoved round-trips correctly`() {
+        assertRoundTrip(NetMessage.PlayerMoved(playerId = 3, stepDelta = 2, significant = true))
     }
 
     @Test
@@ -58,10 +63,11 @@ class MessageCodecTest {
         val message = NetMessage.LobbyState(
             mode = GameMode.STANDARD,
             players = listOf(
-                LobbyPlayer(id = 1, name = "Host", seatCell = 0, element = Element.FIRE, ready = true),
+                LobbyPlayer(id = 1, name = "Host", outgoingBearings = mapOf(2 to 90f), element = Element.FIRE, ready = true),
                 LobbyPlayer(id = 2, name = "Client", ready = false),
             ),
             yourPlayerId = 2,
+            yourBearings = mapOf(1 to 270f),
         )
         assertRoundTrip(message)
     }
@@ -72,8 +78,8 @@ class MessageCodecTest {
             mode = GameMode.KIDS,
             roundIndex = 0,
             roundDurationSeconds = 60,
-            players = listOf(LobbyPlayer(id = 1, name = "Host", seatCell = 1, ready = true)),
-            facingCaptureSeconds = 3,
+            players = listOf(LobbyPlayer(id = 1, name = "Host", ready = true)),
+            bearings = mapOf(1 to mapOf(2 to 180f), 2 to mapOf(1 to 0f)),
         )
         assertRoundTrip(message)
     }
@@ -169,6 +175,25 @@ class MessageCodecTest {
     @Test
     fun `Rematch round-trips correctly`() {
         assertRoundTrip(NetMessage.Rematch)
+    }
+
+    @Test
+    fun `Regreet round-trips correctly`() {
+        assertRoundTrip(NetMessage.Regreet)
+    }
+
+    @Test
+    fun `PlayerSnapshot movementWarning round-trips correctly`() {
+        val snapshot = GameSnapshot(
+            seq = 1,
+            phase = RoundPhase.PLAYING,
+            remainingMillis = 1_000L,
+            players = listOf(
+                PlayerSnapshot(id = 1, hp = 100, status = PlayerStatus.FORFEITED),
+                PlayerSnapshot(id = 2, hp = 100, movementWarning = true),
+            ),
+        )
+        assertRoundTrip(NetMessage.StateBroadcast(snapshot))
     }
 
     // ---------------------------------------------------------------------------

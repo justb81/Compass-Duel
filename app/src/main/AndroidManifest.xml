@@ -20,6 +20,10 @@
     <!-- Haptic feedback (hit / incoming attack / shield). -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
+    <!-- Step detection: flags a player who physically leaves their seat mid-round.
+         Optional — the app degrades to significant-motion-only when not granted. -->
+    <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
+
     <!-- BLE is the primary discovery channel. -->
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 

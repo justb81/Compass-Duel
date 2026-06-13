@@ -2,7 +2,6 @@ package com.justb81.compassduel.ui.screens.home
 
 import androidx.lifecycle.ViewModel
 import com.justb81.compassduel.net.protocol.GameMode
-import com.justb81.compassduel.sensor.AimCalibrationStore
 import com.justb81.compassduel.session.GameSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +25,6 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val session: GameSession,
-    private val calibrationStore: AimCalibrationStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
@@ -51,7 +49,6 @@ class HomeViewModel @Inject constructor(
      */
     fun hostGame() {
         val state = _uiState.value
-        calibrationStore.clear()
         session.hostLobby(playerName = state.playerName.trim(), mode = state.selectedMode)
     }
 
@@ -62,7 +59,6 @@ class HomeViewModel @Inject constructor(
      */
     fun joinGame() {
         val state = _uiState.value
-        calibrationStore.clear()
         session.joinLobby(playerName = state.playerName.trim())
     }
 }

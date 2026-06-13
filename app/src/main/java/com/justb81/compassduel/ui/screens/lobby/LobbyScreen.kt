@@ -44,8 +44,8 @@ import com.justb81.compassduel.R
 import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.protocol.GameMode
+import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.ui.components.PlayerBadge
-import com.justb81.compassduel.ui.components.SeatGrid
 
 private val SCREEN_PADDING_DP = 16.dp
 private val SECTION_SPACING_DP = 24.dp
@@ -151,10 +151,10 @@ fun LobbyScreen(
                     uiState = uiState,
                     isHost = isHost,
                     onSetMode = viewModel::setMode,
-                    onChooseSeat = viewModel::chooseSeat,
+                    onArmBow = viewModel::armBow,
+                    onCancelBow = viewModel::cancelBow,
                     onChooseElement = viewModel::chooseElement,
                     onChooseSprite = viewModel::chooseSprite,
-                    onCalibrate = viewModel::calibrateAim,
                     onStartMatch = viewModel::startMatch,
                     modifier = Modifier
                         .fillMaxSize()
@@ -220,10 +220,10 @@ private fun LobbyContent(
     uiState: LobbyUiState,
     isHost: Boolean,
     onSetMode: (GameMode) -> Unit,
-    onChooseSeat: (Int) -> Unit,
+    onArmBow: (Int) -> Unit,
+    onCancelBow: () -> Unit,
     onChooseElement: (Element) -> Unit,
     onChooseSprite: (Int) -> Unit,
-    onCalibrate: () -> Unit,
     onStartMatch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -260,12 +260,13 @@ private fun LobbyContent(
             )
         }
 
-        // ---- Seat grid ----
-        SectionHeader(text = stringResource(R.string.lobby_seat_header))
-        SeatGrid(
-            players = uiState.players,
-            myPlayerId = uiState.myPlayerId,
-            onCellSelected = onChooseSeat,
+        // ---- Greeting handshake ----
+        SectionHeader(text = stringResource(R.string.lobby_greet_header))
+        GreetingSection(
+            targets = uiState.greetingTargets,
+            armedTargetId = uiState.armedTargetId,
+            onArmBow = onArmBow,
+            onCancelBow = onCancelBow,
         )
 
         // ---- Character picker ----
@@ -285,13 +286,6 @@ private fun LobbyContent(
                 )
             }
         }
-
-        // ---- Aim calibration ----
-        SectionHeader(text = stringResource(R.string.lobby_calibrate_header))
-        CalibrationSection(
-            isCalibrated = uiState.isCalibrated,
-            onCalibrate = onCalibrate,
-        )
 
         // ---- Start / wait ----
         Spacer(modifier = Modifier.height(ITEM_SPACING_DP))
@@ -327,18 +321,17 @@ private fun LobbyActionRow(
 }
 
 /**
- * In-lobby aim calibration. Players point the phone forward at the play area and tap to
- * record their forward heading before the match starts, so the round no longer depends on a
- * single buzzer-time capture. Especially helpful in Kids Mode, where children should not be
- * rushed at round start.
- *
- * The captured offset is held locally in
- * [com.justb81.compassduel.sensor.AimCalibrationStore] and never sent over the network.
+ * The greeting handshake. To establish where everyone is sitting, each player bows at every
+ * opponent: tap an opponent to arm, then point the phone at them and tilt it forward. The
+ * captured bearing is sent to the host. A match can start only once everyone has greeted
+ * each other both ways. This replaces the old manual seat grid and aim calibration.
  */
 @Composable
-private fun CalibrationSection(
-    isCalibrated: Boolean,
-    onCalibrate: () -> Unit,
+private fun GreetingSection(
+    targets: List<GreetingTarget>,
+    armedTargetId: Int?,
+    onArmBow: (Int) -> Unit,
+    onCancelBow: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -346,28 +339,51 @@ private fun CalibrationSection(
         verticalArrangement = Arrangement.spacedBy(BADGE_SPACING_DP),
     ) {
         Text(
-            text = stringResource(R.string.lobby_calibrate_hint),
+            text = stringResource(R.string.lobby_greet_hint),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (isCalibrated) {
-            Text(
-                text = stringResource(R.string.lobby_calibrated_label),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.primary,
+        targets.forEach { target ->
+            GreetingTargetRow(
+                target = target,
+                isArmed = target.id == armedTargetId,
+                onArmBow = { onArmBow(target.id) },
+                onCancelBow = onCancelBow,
             )
-            OutlinedButton(
-                onClick = onCalibrate,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(text = stringResource(R.string.lobby_recalibrate_button))
+        }
+    }
+}
+
+@Composable
+private fun GreetingTargetRow(
+    target: GreetingTarget,
+    isArmed: Boolean,
+    onArmBow: () -> Unit,
+    onCancelBow: () -> Unit,
+) {
+    val statusText = when {
+        target.iGreetedThem && target.theyGreetedMe -> stringResource(R.string.lobby_greet_done)
+        target.iGreetedThem -> stringResource(R.string.lobby_greet_waiting_back, target.name)
+        isArmed -> stringResource(R.string.lobby_greet_bow_now, target.name)
+        else -> stringResource(R.string.lobby_greet_pending, target.name)
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(ITEM_SPACING_DP),
+    ) {
+        Text(
+            text = statusText,
+            style = MaterialTheme.typography.bodyMedium,
+            modifier = Modifier.weight(1f),
+        )
+        when {
+            target.iGreetedThem -> Unit
+            isArmed -> OutlinedButton(onClick = onCancelBow) {
+                Text(text = stringResource(R.string.lobby_greet_cancel))
             }
-        } else {
-            Button(
-                onClick = onCalibrate,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(text = stringResource(R.string.lobby_calibrate_button))
+            else -> Button(onClick = onArmBow) {
+                Text(text = stringResource(R.string.lobby_greet_button))
             }
         }
     }
@@ -554,22 +570,26 @@ private fun SpriteButton(
 }
 
 /**
- * Returns true when the current lobby state satisfies the host-side
- * startMatch validation: 2–4 players, all seated on unique cells, all picked.
+ * Returns true when the current lobby state satisfies the host-side startMatch validation:
+ * 2–4 players, every ordered pair greeted each other, all characters picked (unique elements
+ * in Standard).
  */
 private fun canStartMatch(uiState: LobbyUiState): Boolean {
     val players = uiState.players
-    val seats = players.mapNotNull { it.seatCell }
     val isStandardValid = uiState.mode != GameMode.STANDARD || run {
         val elements = players.mapNotNull { it.element }
         players.all { it.element != null } && elements.size == elements.toSet().size
     }
     val isKidsValid = uiState.mode != GameMode.KIDS || players.all { it.spriteId != null }
     return players.size in 2..4 &&
-        players.all { it.seatCell != null } &&
-        seats.size == seats.toSet().size &&
+        allPairsGreeted(players) &&
         isStandardValid &&
         isKidsValid
+}
+
+/** True when every ordered pair of [players] has a captured outgoing bearing. */
+private fun allPairsGreeted(players: List<LobbyPlayer>): Boolean = players.all { p ->
+    players.filter { it.id != p.id }.all { p.outgoingBearings.containsKey(it.id) }
 }
 
 private fun elementEmoji(element: Element): String = when (element) {

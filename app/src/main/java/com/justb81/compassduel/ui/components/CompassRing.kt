@@ -190,8 +190,9 @@ private fun DrawScope.drawReticle(
  * @param id Player id.
  * @param name Display name for accessibility / debug.
  * @param color The dot colour assigned to this opponent.
- * @param bearingDegrees Bearing from the local player's seat to this opponent's seat,
- *   in degrees [0, 360). Comes from [com.justb81.compassduel.game.Bearing.calculate].
+ * @param bearingDegrees Absolute bearing from the local player toward this opponent,
+ *   in degrees [0, 360). Captured by the greeting handshake (see
+ *   [com.justb81.compassduel.session.GameSession.myBearings]).
  * @param onTarget True when the local player's current aim is within the aim tolerance
  *   of this opponent.
  */

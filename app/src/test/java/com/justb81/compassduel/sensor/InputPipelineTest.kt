@@ -32,8 +32,6 @@ class InputPipelineTest {
         override fun nowMillis(): Long = time
     }
 
-    private val zeroCalibration = AimCalibration(facingOffsetDegrees = 0f)
-
     private fun upright(azimuth: Float = 0f) =
         OrientationSample(azimuthDegrees = azimuth, pitchDegrees = 0f, rollDegrees = 0f, accuracy = 3)
 
@@ -62,7 +60,6 @@ class InputPipelineTest {
             clock = testClock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
-            calibration = zeroCalibration,
             onInput = { outputs += it },
         )
 
@@ -74,7 +71,6 @@ class InputPipelineTest {
     fun `cadence emits SHIELD once the upright-steady hold completes`() = runTest {
         val outputs = mutableListOf<NetMessage.PlayerInput>()
         // Stamp each successive sample one hold-window apart so the 2nd activates the shield.
-        // (A stepping clock avoids relying on merge interleaving to advance time.)
         val clock = steppingClock(GestureThresholds.SHIELD_HOLD_MILLIS)
 
         InputPipeline.processSamples(
@@ -86,7 +82,6 @@ class InputPipelineTest {
             clock = clock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
-            calibration = zeroCalibration,
             onInput = { outputs += it },
         )
 
@@ -108,7 +103,6 @@ class InputPipelineTest {
             clock = testClock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
-            calibration = zeroCalibration,
             onInput = { outputs += it },
         )
 
@@ -128,7 +122,6 @@ class InputPipelineTest {
                 clock = testClock,
                 playerId = PLAYER_ID,
                 mode = mode,
-                calibration = zeroCalibration,
                 onInput = { sink += it },
             )
         }
@@ -155,7 +148,6 @@ class InputPipelineTest {
             clock = clock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
-            calibration = zeroCalibration,
             onInput = { },
             onShieldArmProgress = { progresses += it },
         )
@@ -164,27 +156,25 @@ class InputPipelineTest {
     }
 
     // ---------------------------------------------------------------------------
-    // Calibration & player id
+    // Raw azimuth & player id
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `processSamples applies calibration to aim azimuth`() = runTest {
+    fun `processSamples reports the raw azimuth as aim`() = runTest {
         val outputs = mutableListOf<NetMessage.PlayerInput>()
-        val calibration = AimCalibration(facingOffsetDegrees = 90f)
         testClock.time = START_TIME + InputPipeline.CADENCE_MILLIS
 
         InputPipeline.processSamples(
-            orientationFlow = flow { emit(upright(azimuth = 180f)) }, // calibrated = (180 - 90) % 360 = 90°
+            orientationFlow = flow { emit(upright(azimuth = 180f)) },
             accelFlow = flow { emit(AccelerometerSample(LOW_ACCEL)) },
             clock = testClock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
-            calibration = calibration,
             onInput = { outputs += it },
         )
 
         assertTrue(outputs.isNotEmpty()) { "Expected at least one emission" }
-        assertEquals(EXPECTED_CALIBRATED_AIM, outputs.last().aimDegrees, AIM_DELTA)
+        assertEquals(EXPECTED_RAW_AIM, outputs.last().aimDegrees, AIM_DELTA)
     }
 
     @Test
@@ -199,7 +189,6 @@ class InputPipelineTest {
             clock = testClock,
             playerId = expectedPlayerId,
             mode = GameMode.STANDARD,
-            calibration = zeroCalibration,
             onInput = { outputs += it },
         )
 
@@ -230,7 +219,6 @@ class InputPipelineTest {
             clock = testClock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
-            calibration = zeroCalibration,
             onInput = { outputs += it },
         )
 
@@ -253,8 +241,8 @@ class InputPipelineTest {
         /** Swing above Kids threshold (1.5) but below Standard threshold (2.5). */
         private const val KIDS_SWING_ABOVE_THRESHOLD = 2.0f
 
-        /** Expected calibrated aim: raw 180° minus offset 90° = 90°. */
-        private const val EXPECTED_CALIBRATED_AIM = 90f
+        /** Expected raw aim: the azimuth is reported unchanged. */
+        private const val EXPECTED_RAW_AIM = 180f
 
         /** Acceptable floating-point error for aim degree comparison. */
         private const val AIM_DELTA = 0.001f

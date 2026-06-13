@@ -1,7 +1,6 @@
 package com.justb81.compassduel.game.engine
 
 import com.justb81.compassduel.game.Element
-import com.justb81.compassduel.game.Position
 import com.justb81.compassduel.game.standard.StandardRules
 import com.justb81.compassduel.net.protocol.GameEventType
 import com.justb81.compassduel.net.protocol.PlayerAction
@@ -16,10 +15,10 @@ class StandardRuleSetTest {
     private val rules = StandardRuleSet()
     private val now = 1_000_000L
 
-    // Player 1 is north of player 2 — bearing from p1 to p2 is 180°, from p2 to p1 is 0°
+    // Greeting bearings: p1 → p2 is 180°, p2 → p1 is 0° (they point at each other).
     private val setup = listOf(
-        EnginePlayerSetup(id = 1, name = "Alice", position = Position(0f, 1f), element = Element.FIRE),
-        EnginePlayerSetup(id = 2, name = "Bob", position = Position(0f, 0f), element = Element.EARTH),
+        EnginePlayerSetup(id = 1, name = "Alice", bearings = mapOf(2 to 180f), element = Element.FIRE),
+        EnginePlayerSetup(id = 2, name = "Bob", bearings = mapOf(1 to 0f), element = Element.EARTH),
     )
 
     private fun twoPlayerState(hp1: Int = 100, hp2: Int = 100): EngineState.Standard =
@@ -60,6 +59,23 @@ class StandardRuleSetTest {
         val result = rules.onTick(state, inputs, now, setup)
         val p2 = (result.state as EngineState.Standard).players.first { it.id == 2 }
         assertEquals(StandardRules.MAX_HP - 30, p2.hp)
+    }
+
+    @Test
+    fun `attack with no captured bearing to the target misses`() {
+        // Actor has no greeting bearing toward player 2 → no target can be selected.
+        val noBearingSetup = listOf(
+            EnginePlayerSetup(id = 1, name = "Alice", bearings = emptyMap(), element = Element.FIRE),
+            EnginePlayerSetup(id = 2, name = "Bob", bearings = mapOf(1 to 0f), element = Element.EARTH),
+        )
+        val state = rules.initialState(noBearingSetup) as EngineState.Standard
+        val inputs = TickInputs(
+            continuousInputs = mapOf(1 to ContinuousInput(aimDegrees = 180f, isShielding = false)),
+            queuedActions = listOf(QueuedAction(1, PlayerAction.ATTACK, 180f)),
+        )
+        val result = rules.onTick(state, inputs, now, noBearingSetup)
+        val p2 = (result.state as EngineState.Standard).players.first { it.id == 2 }
+        assertEquals(StandardRules.MAX_HP, p2.hp)
     }
 
     @Test

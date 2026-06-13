@@ -1,12 +1,13 @@
 package com.justb81.compassduel.game.engine
 
+import com.justb81.compassduel.game.CommonModeEstimator
 import com.justb81.compassduel.game.Element
-import com.justb81.compassduel.game.Position
 import com.justb81.compassduel.game.kids.KidsAward
 import com.justb81.compassduel.game.kids.KidsPlayer
 import com.justb81.compassduel.game.kids.KidsRoundStats
 import com.justb81.compassduel.game.standard.DuelPlayer
 import com.justb81.compassduel.net.protocol.GameEvent
+import com.justb81.compassduel.net.protocol.GameEventType
 import com.justb81.compassduel.net.protocol.GameSnapshot
 import com.justb81.compassduel.net.protocol.PlayerAction
 import com.justb81.compassduel.net.protocol.PlayerSnapshot
@@ -43,14 +44,15 @@ interface GameClock {
  *
  * @param id Player id (1 = host; 2–4 = clients).
  * @param name Display name.
- * @param position Seat position on the floor-plan grid (used for bearing calculations).
+ * @param bearings Absolute bearings (`targetId → degrees [0, 360)`) this player captured
+ *   by bowing at each opponent during the greeting handshake.
  * @param element Chosen element (Standard Mode); null for Kids Mode or if not yet picked.
  * @param spriteId Chosen sprite index (Kids Mode); null otherwise.
  */
 data class EnginePlayerSetup(
     val id: Int,
     val name: String,
-    val position: Position,
+    val bearings: Map<Int, Float> = emptyMap(),
     val element: Element? = null,
     val spriteId: Int? = null,
 )
@@ -121,7 +123,7 @@ data class TickInputs(
 /**
  * Continuous per-player input: aim and posture.
  *
- * @param aimDegrees Calibrated aim azimuth in degrees [0, 360).
+ * @param aimDegrees Raw absolute aim azimuth in degrees [0, 360).
  * @param isShielding True when the device is in shield / magic-bubble posture.
  */
 data class ContinuousInput(
@@ -194,7 +196,7 @@ interface ModeRuleSet {
     /**
      * Builds the initial [EngineState] from the per-player setup data.
      *
-     * @param setup Player list in the order they joined; positions come from seat grid.
+     * @param setup Player list in the order they joined; bearings come from the greeting handshake.
      */
     fun initialState(setup: List<EnginePlayerSetup>): EngineState
 
@@ -208,7 +210,7 @@ interface ModeRuleSet {
      * @param state Current engine state (must be the correct subtype for this rule set).
      * @param inputs All continuous and discrete inputs for this tick.
      * @param nowMillis Current epoch millis from [GameClock].
-     * @param setup Original player setup, providing positions for bearing math.
+     * @param setup Original player setup, providing the greeting bearings for hit math.
      */
     fun onTick(
         state: EngineState,
@@ -308,6 +310,17 @@ open class GameEngine(
     private val continuousInputs: MutableMap<Int, ContinuousInput> = mutableMapOf()
     private val queuedActions: ArrayDeque<QueuedAction> = ArrayDeque()
 
+    // Movement state — written from any thread (session movement handler), read on the tick loop.
+    private val movementLock = Any()
+    private val forfeitedPlayers: MutableSet<Int> = mutableSetOf()
+    private val movementWarnings: MutableSet<Int> = mutableSetOf()
+    private val pendingForfeitEvents: MutableList<Int> = mutableListOf()
+    private val pendingWarningEvents: MutableList<Int> = mutableListOf()
+
+    // Per-player heading captured at the first PLAYING tick, used by the common-mode
+    // estimator to cancel shared (vehicle) rotation. Drained on the tick loop only.
+    private val baselineHeadings: MutableMap<Int, Float> = mutableMapOf()
+
     /**
      * Starts a new round, resetting all state and beginning the COUNTDOWN phase.
      *
@@ -322,6 +335,13 @@ open class GameEngine(
             continuousInputs.clear()
             queuedActions.clear()
         }
+        synchronized(movementLock) {
+            forfeitedPlayers.clear()
+            movementWarnings.clear()
+            pendingForfeitEvents.clear()
+            pendingWarningEvents.clear()
+        }
+        baselineHeadings.clear()
 
         // Reset the round-over signal so the new round has a fresh, uncompleted deferred.
         _roundOverSignal = CompletableDeferred()
@@ -363,6 +383,31 @@ open class GameEngine(
             continuousInputs[playerId] = ContinuousInput(aimDegrees, isShielding)
             if (action != null && action != PlayerAction.IDLE && action != PlayerAction.SHIELD) {
                 queuedActions.addLast(QueuedAction(playerId, action, aimDegrees))
+            }
+        }
+    }
+
+    /**
+     * Forfeits [playerId] for the rest of the round after they physically left their seat.
+     * Their inputs are ignored from the next tick, they can no longer be targeted, and a
+     * [GameEventType.MOVED_FORFEIT] event is emitted once. Thread-safe.
+     */
+    open fun forfeitPlayer(playerId: Int) {
+        synchronized(movementLock) {
+            if (forfeitedPlayers.add(playerId)) pendingForfeitEvents.add(playerId)
+            movementWarnings.remove(playerId)
+        }
+    }
+
+    /**
+     * Flags [playerId] with a movement warning (moved past the in-seat tolerance but not
+     * yet forfeited). Surfaces as [PlayerSnapshot.movementWarning] and emits a
+     * [GameEventType.MOVED_WARNING] event once. Thread-safe.
+     */
+    open fun setMovementWarning(playerId: Int) {
+        synchronized(movementLock) {
+            if (playerId !in forfeitedPlayers && movementWarnings.add(playerId)) {
+                pendingWarningEvents.add(playerId)
             }
         }
     }
@@ -421,20 +466,7 @@ open class GameEngine(
 
         // Only run rule logic during the active phase and when not already over
         val tickResult: TickResult = when (currentPhase) {
-            RoundPhase.PLAYING -> {
-                if (rules.isRoundOver(state, elapsed)) {
-                    transitionToRoundOver()
-                    TickResult(state, emptyList(), emptyMap())
-                } else {
-                    val result = rules.onTick(state, inputs, now, setup)
-                    engineState = result.state
-                    // Check for round-over caused by the tick (e.g. survivor elimination)
-                    if (rules.isRoundOver(result.state, elapsed)) {
-                        transitionToRoundOver()
-                    }
-                    result
-                }
-            }
+            RoundPhase.PLAYING -> playingTick(state, inputs, elapsed, now)
             else -> TickResult(state, emptyList(), emptyMap())
         }
         val (updatedState, events, targetIds) = tickResult
@@ -451,6 +483,91 @@ open class GameEngine(
         _snapshots.value = buildSnapshot(updatedState, currentPhase, remainingMillis, events, targetIds)
     }
 
+    /**
+     * Runs one PLAYING-phase tick: drains movement state, cancels common-mode (vehicle)
+     * rotation, drops forfeited players' inputs, delegates to the rule set, and applies
+     * forfeit elimination.
+     */
+    private fun playingTick(
+        state: EngineState,
+        inputs: TickInputs,
+        elapsed: Long,
+        now: Long,
+    ): TickResult {
+        val movement = drainMovement()
+        if (rules.isRoundOver(state, elapsed)) {
+            transitionToRoundOver()
+            return TickResult(state, movement.events, emptyMap())
+        }
+        val prepared = prepareInputs(inputs, movement.forfeited)
+        val result = rules.onTick(state, prepared, now, setup)
+        val newState = applyForfeits(result.state, movement.forfeited)
+        engineState = newState
+        // Check for round-over caused by the tick (e.g. survivor elimination / forfeit).
+        if (rules.isRoundOver(newState, elapsed)) {
+            transitionToRoundOver()
+        }
+        return TickResult(
+            state = newState,
+            events = result.events + movement.events,
+            targetIds = result.targetIds.filterKeys { it !in movement.forfeited },
+        )
+    }
+
+    /** Reads the current movement state and drains the one-shot movement events. */
+    private fun drainMovement(): MovementSnapshot = synchronized(movementLock) {
+        val events = pendingForfeitEvents.map { GameEvent(GameEventType.MOVED_FORFEIT, it) } +
+            pendingWarningEvents.map { GameEvent(GameEventType.MOVED_WARNING, it) }
+        pendingForfeitEvents.clear()
+        pendingWarningEvents.clear()
+        MovementSnapshot(forfeitedPlayers.toSet(), movementWarnings.toSet(), events)
+    }
+
+    /**
+     * Filters out forfeited players and cancels the common-mode rotation shared by all
+     * remaining players' headings (see [CommonModeEstimator]). Per-player round-start
+     * baselines are captured lazily on first sight during PLAYING.
+     */
+    private fun prepareInputs(inputs: TickInputs, forfeited: Set<Int>): TickInputs {
+        val active = inputs.continuousInputs.filterKeys { it !in forfeited }
+        active.forEach { (id, ci) -> baselineHeadings.getOrPut(id) { ci.aimDegrees } }
+        val currentAims = active.mapValues { it.value.aimDegrees }
+        val theta = CommonModeEstimator.estimate(baselineHeadings, currentAims)
+        val correctedContinuous = active.mapValues { (_, ci) ->
+            ci.copy(aimDegrees = wrapDegrees(ci.aimDegrees - theta))
+        }
+        val correctedActions = inputs.queuedActions
+            .filter { it.playerId !in forfeited }
+            .map { it.copy(aimDegrees = wrapDegrees(it.aimDegrees - theta)) }
+        return TickInputs(correctedContinuous, correctedActions)
+    }
+
+    /** Applies forfeit as elimination in Standard Mode; Kids forfeit is input-drop only. */
+    private fun applyForfeits(state: EngineState, forfeited: Set<Int>): EngineState = when (state) {
+        is EngineState.Standard ->
+            if (forfeited.isEmpty()) {
+                state
+            } else {
+                state.copy(
+                    players = state.players.map {
+                        if (it.id in forfeited && !it.isEliminated) it.copy(hp = 0) else it
+                    },
+                )
+            }
+        is EngineState.Kids -> state
+    }
+
+    private fun currentForfeited(): Set<Int> = synchronized(movementLock) { forfeitedPlayers.toSet() }
+
+    private fun currentWarnings(): Set<Int> = synchronized(movementLock) { movementWarnings.toSet() }
+
+    /** Movement state snapshot read once per PLAYING tick. */
+    private data class MovementSnapshot(
+        val forfeited: Set<Int>,
+        val warnings: Set<Int>,
+        val events: List<GameEvent>,
+    )
+
     // ---------------------------------------------------------------------------
     // Snapshot builder
     // ---------------------------------------------------------------------------
@@ -462,14 +579,17 @@ open class GameEngine(
         events: List<GameEvent>,
         targetIds: Map<Int, Int?>,
     ): GameSnapshot {
+        val forfeited = currentForfeited()
+        val warnings = currentWarnings()
         val players = when (state) {
             is EngineState.Standard -> state.players.map { p ->
                 PlayerSnapshot(
                     id = p.id,
                     hp = p.hp,
-                    status = standardStatus(p),
+                    status = if (p.id in forfeited) PlayerStatus.FORFEITED else standardStatus(p),
                     targetId = targetIds[p.id],
                     shieldRemainingMillis = p.shieldRemainingMillis,
+                    movementWarning = p.id in warnings,
                 )
             }
             is EngineState.Kids -> state.players.map { p ->
@@ -477,9 +597,10 @@ open class GameEngine(
                 PlayerSnapshot(
                     id = p.id,
                     stars = p.stars,
-                    status = kidsStatus(p, now),
+                    status = if (p.id in forfeited) PlayerStatus.FORFEITED else kidsStatus(p, now),
                     targetId = targetIds[p.id],
                     restingUntilMillis = p.restingUntilMillis,
+                    movementWarning = p.id in warnings,
                 )
             }
         }
@@ -542,5 +663,8 @@ open class GameEngine(
         private const val DEFAULT_TICK_MILLIS = 100L
         private const val COUNTDOWN_MILLIS = 3_000L
         private const val MILLIS_PER_SECOND = 1_000L
+        private const val FULL_CIRCLE = 360f
+
+        private fun wrapDegrees(deg: Float): Float = ((deg % FULL_CIRCLE) + FULL_CIRCLE) % FULL_CIRCLE
     }
 }

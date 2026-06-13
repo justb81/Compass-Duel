@@ -101,10 +101,10 @@ class StandardRuleSet : ModeRuleSet {
         val actor = players.getOrNull(actorIndex)
         if (actor == null || actor.isEliminated || nowMillis < actor.attackReadyAtMillis) return players
         val actorSetup = setup.firstOrNull { it.id == actor.id }
-        val target = actorSetup?.let { selectTarget(actor.id, action.aimDegrees, players, setup, it) }
+        val target = actorSetup?.let { selectTarget(actor.id, action.aimDegrees, players, it) }
         if (actorSetup == null || target == null) return players
 
-        val bearing = Bearing.calculate(actorSetup.position, setup.first { it.id == target.id }.position)
+        val bearing = actorSetup.bearings[target.id] ?: return players
         val result = evaluateAttack(
             aimAzimuth = action.aimDegrees,
             bearingToTarget = bearing,
@@ -188,14 +188,12 @@ class StandardRuleSet : ModeRuleSet {
         actorId: Int,
         aimDegrees: Float,
         players: List<DuelPlayer>,
-        setup: List<EnginePlayerSetup>,
         actorSetup: EnginePlayerSetup,
     ): DuelPlayer? {
         return players
             .filter { it.id != actorId && !it.isEliminated }
             .mapNotNull { candidate ->
-                val candidateSetup = setup.firstOrNull { it.id == candidate.id } ?: return@mapNotNull null
-                val bearing = Bearing.calculate(actorSetup.position, candidateSetup.position)
+                val bearing = actorSetup.bearings[candidate.id] ?: return@mapNotNull null
                 val distance = Bearing.angularDistance(aimDegrees, bearing)
                 if (distance <= aimToleranceDegrees) candidate to distance else null
             }
@@ -217,7 +215,7 @@ class StandardRuleSet : ModeRuleSet {
             val targetId = if (input != null && !actor.isEliminated) {
                 val actorSetup = setup.firstOrNull { it.id == actor.id }
                 if (actorSetup != null) {
-                    selectTarget(actor.id, input.aimDegrees, players, setup, actorSetup)?.id
+                    selectTarget(actor.id, input.aimDegrees, players, actorSetup)?.id
                 } else {
                     null
                 }

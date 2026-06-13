@@ -2,7 +2,8 @@ package com.justb81.compassduel.session
 
 import com.justb81.compassduel.di.ApplicationScope
 import com.justb81.compassduel.di.GameLoopDispatcher
-import com.justb81.compassduel.game.Position
+import com.justb81.compassduel.game.MovementPolicy
+import com.justb81.compassduel.game.MovementVerdict
 import com.justb81.compassduel.game.engine.EnginePlayerSetup
 import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.engine.GameEngine
@@ -56,6 +57,12 @@ sealed interface SessionEvent {
 
     /** A peer was lost (host disconnected on client; required client disconnected on host mid-round). */
     data object PeerLost : SessionEvent
+
+    /**
+     * A player forfeited mid-match by leaving their seat; the host needs everyone to
+     * re-greet before the next round. Screens return to the lobby greeting view.
+     */
+    data object RegreetRequired : SessionEvent
 }
 
 /**
@@ -77,10 +84,11 @@ fun interface GameEngineFactory {
  * On the **client**: decodes host messages into the same [StateFlow] surface so ViewModels
  * need no role-specific logic.
  *
- * ### Seat-position grid
- * Cells are numbered 0–8 in reading order (left-to-right, top-to-bottom).
- * `Position(x = cell % 3, y = cell / 3)` places row 0 at the front of the play area
- * (closest to opposing players) and row 2 at the back.
+ * ### Greeting bearings
+ * Players establish their relative bearings via the "bow to greet" handshake instead of a
+ * seat grid: each player bows at every opponent, capturing the absolute azimuth from their
+ * phone toward that opponent. The host stores these as [bearingMatrix] (`actorId →
+ * (targetId → degrees)`) and feeds them to the engine for hit detection.
  *
  * ### Match flow (standard)
  * Host runs best-of-[com.justb81.compassduel.game.standard.StandardRules.ROUNDS_TO_WIN × 2 − 1].
@@ -121,6 +129,11 @@ class GameSession @Inject constructor(
     /** Round-end result, or null while the round is in progress. */
     val roundEnd: StateFlow<NetMessage.RoundEnd?> = _roundEnd.asStateFlow()
 
+    private val _myBearings = MutableStateFlow<Map<Int, Float>>(emptyMap())
+
+    /** The local player's captured outgoing bearings (`targetId → degrees`) for the round. */
+    val myBearings: StateFlow<Map<Int, Float>> = _myBearings.asStateFlow()
+
     // replay=1: a late or re-subscribing collector (e.g. after recomposition tears down
     // LaunchedEffect) receives the most recent navigation event so navigation is never
     // permanently stranded by a dropped event (#63).
@@ -154,7 +167,7 @@ class GameSession @Inject constructor(
 
     // lobbyPlayers is guarded by lobbyLock: it is mutated both from the transport-collector
     // coroutines (Dispatchers.Default pool) and from main-thread API calls (hostLobby,
-    // chooseSeat, chooseCharacter, startMatch). All read-modify-write sequences on
+    // submitBow, chooseCharacter, startMatch). All read-modify-write sequences on
     // lobbyPlayers must be performed inside synchronized(lobbyLock) (#61).
     //
     // endpointToPlayerId is a ConcurrentHashMap so its individual operations (put/remove/get)
@@ -163,6 +176,18 @@ class GameSession @Inject constructor(
     private val lobbyLock = Any()
     private var lobbyPlayers: MutableList<LobbyPlayer> = mutableListOf()
     private val endpointToPlayerId: MutableMap<String, Int> = ConcurrentHashMap()
+
+    // Greeting bearing matrix: actorId -> (targetId -> absolute bearing degrees).
+    // Mutated from transport-collector coroutines and main-thread API calls; guarded by
+    // lobbyLock like lobbyPlayers (#61).
+    private val bearingMatrix: MutableMap<Int, MutableMap<Int, Float>> = mutableMapOf()
+
+    // Per-player accumulated step count since their bearings were last established; reset
+    // when a player (re-)greets. Used by the movement-forfeit policy during a round.
+    private val movementSteps: MutableMap<Int, Int> = ConcurrentHashMap()
+
+    // Pending standard-mode next round deferred until forfeited players re-greet.
+    private var awaitingRegreet: Boolean = false
     private var engine: GameEngine? = null
     private var snapshotJob: Job? = null
     private var messageJob: Job? = null
@@ -222,8 +247,8 @@ class GameSession @Inject constructor(
     /**
      * Validates the lobby and starts the match (host only).
      *
-     * Requirements: 2–4 players; all players have chosen a unique seat;
-     * in STANDARD mode all players have chosen a unique element.
+     * Requirements: 2–4 players; every ordered pair of players has greeted each other
+     * (a complete bearing matrix); in STANDARD mode all players have chosen a unique element.
      *
      * @throws IllegalStateException if validation fails.
      */
@@ -234,9 +259,9 @@ class GameSession @Inject constructor(
         check(players.size in MIN_PLAYERS..MAX_PLAYERS) {
             "Need $MIN_PLAYERS–$MAX_PLAYERS players; have ${players.size}"
         }
-        check(players.all { it.seatCell != null }) { "All players must choose a seat" }
-        val seats = players.mapNotNull { it.seatCell }
-        check(seats.size == seats.toSet().size) { "Duplicate seat assignments" }
+        check(synchronized(lobbyLock) { allPairsGreeted(players) }) {
+            "All players must greet each other before starting"
+        }
 
         if (currentLobby.mode == GameMode.STANDARD) {
             check(players.all { it.element != null }) { "All players must choose an element in Standard mode" }
@@ -310,22 +335,25 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     /**
-     * Selects a seat on the 3×3 grid.
+     * Records a bow at [toPlayerId], capturing the absolute [bearingDegrees] from the local
+     * player toward that opponent during the greeting handshake.
      *
-     * Host: mutates the local lobby and rebroadcasts. Client: sends [NetMessage.SeatChosen].
+     * Host: records into [bearingMatrix] and rebroadcasts. Client: sends [NetMessage.Greeting].
      *
-     * @param cell Seat cell index in [0, 8].
+     * @param toPlayerId The greeted player's id.
+     * @param bearingDegrees Raw absolute azimuth in `[0, 360)` captured at bow onset.
      */
-    fun chooseSeat(cell: Int) {
+    fun submitBow(toPlayerId: Int, bearingDegrees: Float) {
+        if (!bearingDegrees.isFinite()) return
         when (_role.value) {
-            SessionRole.HOST -> {
-                val mode = _lobby.value?.mode ?: GameMode.STANDARD
-                updateHostPlayer { it.copy(seatCell = cell) }
-                broadcastLobbyToAll(mode)
-            }
+            SessionRole.HOST -> recordGreeting(HOST_PLAYER_ID, toPlayerId, bearingDegrees)
             SessionRole.CLIENT -> transport.send(
                 hostEndpointId ?: return,
-                NetMessage.SeatChosen(cell),
+                NetMessage.Greeting(
+                    fromPlayerId = _lobby.value?.yourPlayerId ?: return,
+                    toPlayerId = toPlayerId,
+                    bearingDegrees = bearingDegrees,
+                ),
             )
             null -> Unit
         }
@@ -374,6 +402,25 @@ class GameSession @Inject constructor(
         when (_role.value) {
             SessionRole.HOST -> feedInputToEngine(input, HOST_PLAYER_ID)
             SessionRole.CLIENT -> transport.send(hostEndpointId ?: return, input)
+            null -> Unit
+        }
+    }
+
+    /**
+     * Reports locally detected physical movement (step detector / significant-motion).
+     *
+     * Host: evaluates the movement policy directly. Client: forwards to the host.
+     *
+     * @param stepDelta Steps detected since the previous report.
+     * @param significant True when a significant-motion event was reported.
+     */
+    fun submitLocalMovement(stepDelta: Int, significant: Boolean) {
+        when (_role.value) {
+            SessionRole.HOST -> processMovement(HOST_PLAYER_ID, stepDelta, significant)
+            SessionRole.CLIENT -> transport.send(
+                hostEndpointId ?: return,
+                NetMessage.PlayerMoved(_lobby.value?.yourPlayerId ?: return, stepDelta, significant),
+            )
             null -> Unit
         }
     }
@@ -429,7 +476,10 @@ class GameSession @Inject constructor(
                 } else {
                     synchronized(lobbyLock) {
                         lobbyPlayers.removeAll { it.id == playerId }
+                        bearingMatrix.remove(playerId)
+                        bearingMatrix.values.forEach { it.remove(playerId) }
                     }
+                    movementSteps.remove(playerId)
                     broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
                 }
             }
@@ -459,9 +509,11 @@ class GameSession @Inject constructor(
             is NetMessage.StateBroadcast,
             is NetMessage.RoundEnd,
             is NetMessage.Rematch,
+            is NetMessage.Regreet,
             -> Unit
             is NetMessage.ClientHello -> handleClientHello(endpointId, message)
-            is NetMessage.SeatChosen -> handleSeatChosen(endpointId, message)
+            is NetMessage.Greeting -> handleGreeting(endpointId, message)
+            is NetMessage.PlayerMoved -> handlePlayerMoved(endpointId, message)
             is NetMessage.CharacterChosen -> handleCharacterChosen(endpointId, message)
             is NetMessage.PlayerInput -> handlePlayerInput(endpointId, message)
         }
@@ -486,19 +538,67 @@ class GameSession @Inject constructor(
         if (added) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
     }
 
-    private fun handleSeatChosen(endpointId: String, message: NetMessage.SeatChosen) {
-        // Reject out-of-range cell indices.
-        if (message.cell !in 0..8) return
-        val playerId = endpointToPlayerId[endpointId] ?: return
-        // The duplicate-seat check and the update must be atomic under lobbyLock
-        // so two clients cannot concurrently claim the same seat (#61).
-        val updated = synchronized(lobbyLock) {
-            // Reject already-taken seats.
-            if (lobbyPlayers.any { it.seatCell == message.cell }) return@synchronized false
-            updatePlayerLocked(playerId) { it.copy(seatCell = message.cell) }
+    private fun handleGreeting(endpointId: String, message: NetMessage.Greeting) {
+        // Reject non-finite/out-of-range bearings before they reach game logic.
+        if (!message.bearingDegrees.isFinite()) return
+        if (message.bearingDegrees < 0f || message.bearingDegrees >= FULL_CIRCLE) return
+        // Trust the endpoint→playerId mapping over the client-supplied fromPlayerId.
+        val fromId = endpointToPlayerId[endpointId] ?: return
+        recordGreeting(fromId, message.toPlayerId, message.bearingDegrees)
+    }
+
+    /**
+     * Records [fromId] → [toId] = [bearingDegrees] in [bearingMatrix] (host-side), resets the
+     * greeter's movement budget, and rebroadcasts. If a deferred next round was awaiting this
+     * greeting, starts it once every pair is greeted again.
+     */
+    private fun recordGreeting(fromId: Int, toId: Int, bearingDegrees: Float) {
+        val accepted = synchronized(lobbyLock) {
+            // Reject greetings toward players not in the lobby (or self).
+            if (fromId == toId || lobbyPlayers.none { it.id == toId }) return@synchronized false
+            bearingMatrix.getOrPut(fromId) { mutableMapOf() }[toId] = bearingDegrees
             true
         }
-        if (updated) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+        if (!accepted) return
+        movementSteps[fromId] = 0
+        if (awaitingRegreet) {
+            maybeResumeAfterRegreet()
+        } else {
+            broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+        }
+    }
+
+    private fun handlePlayerMoved(endpointId: String, message: NetMessage.PlayerMoved) {
+        val playerId = endpointToPlayerId[endpointId] ?: return
+        processMovement(playerId, message.stepDelta, message.significant)
+    }
+
+    /**
+     * Accumulates movement for [playerId] and applies the [MovementPolicy] verdict: a warning
+     * flags the player; a forfeit eliminates them for the round, invalidates their bearings,
+     * and (Standard) defers the next round until everyone re-greets.
+     */
+    private fun processMovement(playerId: Int, stepDelta: Int, significant: Boolean) {
+        if (!matchInProgress) return
+        val activeEngine = engine ?: return
+        val steps = (movementSteps[playerId] ?: 0) + stepDelta.coerceAtLeast(0)
+        movementSteps[playerId] = steps
+        when (MovementPolicy.evaluate(steps, significant)) {
+            MovementVerdict.OK -> Unit
+            MovementVerdict.WARN -> activeEngine.setMovementWarning(playerId)
+            MovementVerdict.FORFEIT -> {
+                activeEngine.forfeitPlayer(playerId)
+                invalidateBearings(playerId)
+            }
+        }
+    }
+
+    /** Removes [playerId] from every greeting pair so they must re-greet before the next round. */
+    private fun invalidateBearings(playerId: Int) {
+        synchronized(lobbyLock) {
+            bearingMatrix.remove(playerId)
+            bearingMatrix.values.forEach { it.remove(playerId) }
+        }
     }
 
     private fun handleCharacterChosen(endpointId: String, message: NetMessage.CharacterChosen) {
@@ -552,6 +652,10 @@ class GameSession @Inject constructor(
                 _snapshot.value = null
                 _sessionEvents.tryEmit(SessionEvent.RematchRequested)
             }
+            is NetMessage.Regreet -> {
+                _snapshot.value = null
+                _sessionEvents.tryEmit(SessionEvent.RegreetRequired)
+            }
             else -> Unit
         }
     }
@@ -566,25 +670,23 @@ class GameSession @Inject constructor(
             GameMode.KIDS -> KidsRuleSet()
         }
 
+        val matrix = synchronized(lobbyLock) { bearingMatrix.mapValues { it.value.toMap() } }
         val roundStart = NetMessage.RoundStart(
             mode = mode,
             roundIndex = roundIndex,
             roundDurationSeconds = rules.roundDurationSeconds,
             players = players,
-            facingCaptureSeconds = FACING_CAPTURE_SECONDS,
+            bearings = matrix,
         )
         transport.broadcast(roundStart)
+        _myBearings.value = matrix[HOST_PLAYER_ID].orEmpty()
         _sessionEvents.tryEmit(SessionEvent.RoundStarted)
 
         val engineSetup = players.map { p ->
-            val cell = p.seatCell ?: 0
             EnginePlayerSetup(
                 id = p.id,
                 name = p.name,
-                position = Position(
-                    x = (cell % GRID_COLUMNS).toFloat(),
-                    y = (cell / GRID_COLUMNS).toFloat(),
-                ),
+                bearings = matrix[p.id].orEmpty(),
                 element = p.element,
                 spriteId = p.spriteId,
             )
@@ -638,19 +740,54 @@ class GameSession @Inject constructor(
                         _sessionEvents.tryEmit(SessionEvent.MatchOver)
                     } else {
                         delay(NEXT_ROUND_DELAY_MILLIS)
-                        roundIndex++
                         // Clear between-round results on both host and client at the same
                         // lifecycle point (before RoundStart is broadcast) so both roles
                         // display the same "stale roundEnd" window (#68).
                         _roundEnd.value = null
-                        val currentLobby = _lobby.value ?: return@launch
-                        val currentPlayers = synchronized(lobbyLock) { lobbyPlayers.toList() }
-                        startRoundInternal(currentLobby.mode, currentPlayers)
+                        startOrDeferNextRound()
                     }
                 }
                 GameMode.KIDS -> _sessionEvents.tryEmit(SessionEvent.MatchOver)
             }
         }
+    }
+
+    /**
+     * Starts the next standard round, or — if a forfeited player invalidated the bearing
+     * matrix — defers it and returns everyone to the lobby greeting view via
+     * [SessionEvent.RegreetRequired].
+     */
+    private fun startOrDeferNextRound() {
+        val currentLobby = _lobby.value ?: return
+        val players = greetedPlayersOrNull()
+        if (players != null) {
+            roundIndex++
+            startRoundInternal(currentLobby.mode, players)
+        } else {
+            awaitingRegreet = true
+            transport.broadcast(NetMessage.Regreet)
+            broadcastLobbyToAll(currentLobby.mode)
+            _sessionEvents.tryEmit(SessionEvent.RegreetRequired)
+        }
+    }
+
+    /** Resumes a deferred next round once every pair is greeted again; otherwise re-broadcasts. */
+    private fun maybeResumeAfterRegreet() {
+        val currentLobby = _lobby.value ?: return
+        val players = greetedPlayersOrNull()
+        if (players != null) {
+            awaitingRegreet = false
+            roundIndex++
+            startRoundInternal(currentLobby.mode, players)
+        } else {
+            broadcastLobbyToAll(currentLobby.mode)
+        }
+    }
+
+    /** Returns the current lobby players when every ordered pair is greeted, else null. */
+    private fun greetedPlayersOrNull(): List<LobbyPlayer>? = synchronized(lobbyLock) {
+        val players = lobbyPlayers.toList()
+        if (allPairsGreeted(players)) players else null
     }
 
     private fun buildRoundEnd(mode: GameMode): NetMessage.RoundEnd? {
@@ -703,15 +840,50 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun broadcastLobbyToAll(mode: GameMode) {
-        val players = synchronized(lobbyLock) { lobbyPlayers.toList() }
-        _lobby.value = NetMessage.LobbyState(mode = mode, players = players, yourPlayerId = HOST_PLAYER_ID)
+        val players: List<LobbyPlayer>
+        val matrix: Map<Int, Map<Int, Float>>
+        synchronized(lobbyLock) {
+            matrix = bearingMatrix.mapValues { it.value.toMap() }
+            players = lobbyPlayers.map { p ->
+                p.copy(
+                    outgoingBearings = matrix[p.id].orEmpty(),
+                    ready = hasCharacter(p, mode) && hasGreetedAllLocked(p.id),
+                )
+            }
+        }
+        _lobby.value = NetMessage.LobbyState(
+            mode = mode,
+            players = players,
+            yourPlayerId = HOST_PLAYER_ID,
+            yourBearings = matrix[HOST_PLAYER_ID].orEmpty(),
+        )
         endpointToPlayerId.forEach { (endpointId, playerId) ->
             transport.send(
                 endpointId,
-                NetMessage.LobbyState(mode = mode, players = players, yourPlayerId = playerId),
+                NetMessage.LobbyState(
+                    mode = mode,
+                    players = players,
+                    yourPlayerId = playerId,
+                    yourBearings = matrix[playerId].orEmpty(),
+                ),
             )
         }
     }
+
+    private fun hasCharacter(player: LobbyPlayer, mode: GameMode): Boolean = when (mode) {
+        GameMode.STANDARD -> player.element != null
+        GameMode.KIDS -> player.spriteId != null
+    }
+
+    /** True when [playerId] has greeted every other current lobby player. Hold [lobbyLock]. */
+    private fun hasGreetedAllLocked(playerId: Int): Boolean {
+        val outgoing = bearingMatrix[playerId] ?: return false
+        return lobbyPlayers.filter { it.id != playerId }.all { outgoing.containsKey(it.id) }
+    }
+
+    /** True when every ordered pair of [players] has a captured bearing. Hold [lobbyLock]. */
+    private fun allPairsGreeted(players: List<LobbyPlayer>): Boolean =
+        players.all { hasGreetedAllLocked(it.id) }
 
     /**
      * Mutates the host player's [LobbyPlayer] entry.
@@ -760,9 +932,13 @@ class GameSession @Inject constructor(
         _lobby.value = null
         _snapshot.value = null
         _roundEnd.value = null
+        _myBearings.value = emptyMap()
         synchronized(lobbyLock) {
             lobbyPlayers.clear()
+            bearingMatrix.clear()
         }
+        movementSteps.clear()
+        awaitingRegreet = false
         endpointToPlayerId.clear()
         localPlayerName = ""
         clientPlayerName = ""
@@ -777,11 +953,8 @@ class GameSession @Inject constructor(
         private const val HOST_PLAYER_ID = 1
         private const val MIN_PLAYERS = 2
         private const val MAX_PLAYERS = 4
-        private const val GRID_COLUMNS = 3
         private const val MAX_PLAYER_NAME_LENGTH = 24
-
-        /** Facing-capture window at round start (seconds). */
-        private const val FACING_CAPTURE_SECONDS = 3
+        private const val FULL_CIRCLE = 360f
 
         /** Buffer for session-level navigation events. */
         private const val SESSION_BUFFER = 16

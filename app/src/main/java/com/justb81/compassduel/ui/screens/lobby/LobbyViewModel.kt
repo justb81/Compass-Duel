@@ -5,11 +5,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.justb81.compassduel.R
 import com.justb81.compassduel.game.Element
+import com.justb81.compassduel.game.engine.GameClock
+import com.justb81.compassduel.game.gesture.BowDetector
+import com.justb81.compassduel.game.gesture.BowSample
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
-import com.justb81.compassduel.sensor.AimCalibrationStore
 import com.justb81.compassduel.sensor.OrientationSensor
 import com.justb81.compassduel.session.GameSession
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,9 +20,18 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** A player the local player can greet, with reciprocal greeting status. */
+data class GreetingTarget(
+    val id: Int,
+    val name: String,
+    /** True when the local player has bowed at this opponent. */
+    val iGreetedThem: Boolean,
+    /** True when this opponent has bowed back at the local player. */
+    val theyGreetedMe: Boolean,
+)
 
 /** UI state for the lobby screen. */
 data class LobbyUiState(
@@ -38,8 +49,10 @@ data class LobbyUiState(
     val startError: String? = null,
     /** String resource for a transport failure to surface via Snackbar (null = no error). */
     @StringRes val transportErrorRes: Int? = null,
-    /** True once the local player has captured their forward-facing aim offset in the lobby. */
-    val isCalibrated: Boolean = false,
+    /** Opponents the local player can greet, with reciprocal greeting status. */
+    val greetingTargets: List<GreetingTarget> = emptyList(),
+    /** The opponent the local player is currently bowing at, or null when not armed. */
+    val armedTargetId: Int? = null,
 )
 
 /**
@@ -48,22 +61,28 @@ data class LobbyUiState(
  * Derives its state from [GameSession.lobby] and [GameSession.discoveredEndpoints]
  * so that host and client see a consistent picture of the lobby.
  *
+ * ### Greeting handshake
+ * To establish their relative positions, players bow at each opponent: the player arms a
+ * target (taps their badge), points the phone at them and tilts it forward. A [BowDetector]
+ * fed by [OrientationSensor] captures the absolute azimuth at bow onset and reports it via
+ * [GameSession.submitBow]. There is no manual seat grid and no aim calibration.
+ *
  * @param session The singleton game session facade.
- * @param orientationSensor Source of raw compass azimuth for in-lobby aim calibration.
- * @param calibrationStore Holds the captured aim offset for the game screen to consume.
+ * @param orientationSensor Source of raw compass azimuth/pitch for bow detection.
+ * @param clock Provides timestamps for the bow detector.
  */
 @HiltViewModel
 class LobbyViewModel @Inject constructor(
     private val session: GameSession,
     private val orientationSensor: OrientationSensor,
-    private val calibrationStore: AimCalibrationStore,
+    private val clock: GameClock,
 ) : ViewModel() {
 
     private val _startError = MutableStateFlow<String?>(null)
     private val _transportErrorRes = MutableStateFlow<Int?>(null)
+    private val _armedTargetId = MutableStateFlow<Int?>(null)
 
-    // Latest raw azimuth from the sensor; sampled on tap to build the calibration.
-    private var latestRawAzimuth = 0f
+    private val bowDetector = BowDetector()
 
     init {
         // Surface transport failures (e.g. advertising/discovery could not start) as a
@@ -73,10 +92,21 @@ class LobbyViewModel @Inject constructor(
                 _transportErrorRes.value = error.toMessageRes()
             }
         }
-        // Track the latest raw azimuth so calibration captures the current heading on tap.
+        // Drive the bow detector from the orientation stream while a target is armed.
         viewModelScope.launch {
             orientationSensor.samples().collect { sample ->
-                latestRawAzimuth = sample.azimuthDegrees
+                val target = _armedTargetId.value ?: return@collect
+                val captured = bowDetector.onSample(
+                    BowSample(
+                        timestampMillis = clock.nowMillis(),
+                        pitchDegrees = sample.pitchDegrees,
+                        azimuthDegrees = sample.azimuthDegrees,
+                    ),
+                )
+                if (captured != null) {
+                    session.submitBow(target, captured)
+                    cancelBow()
+                }
             }
         }
     }
@@ -87,8 +117,8 @@ class LobbyViewModel @Inject constructor(
         session.discoveredEndpoints,
         _startError,
         _transportErrorRes,
-        calibrationStore.calibration,
-    ) { lobby, endpoints, startError, transportErrorRes, calibration ->
+        _armedTargetId,
+    ) { lobby, endpoints, startError, transportErrorRes, armedTargetId ->
         if (lobby != null) {
             LobbyUiState(
                 players = lobby.players,
@@ -98,7 +128,8 @@ class LobbyViewModel @Inject constructor(
                 isSearching = false,
                 startError = startError,
                 transportErrorRes = transportErrorRes,
-                isCalibrated = calibration != null,
+                greetingTargets = buildGreetingTargets(lobby.players, lobby.yourPlayerId),
+                armedTargetId = armedTargetId,
             )
         } else {
             LobbyUiState(
@@ -106,7 +137,6 @@ class LobbyViewModel @Inject constructor(
                 isSearching = true,
                 startError = startError,
                 transportErrorRes = transportErrorRes,
-                isCalibrated = calibration != null,
             )
         }
     }.stateIn(
@@ -115,24 +145,33 @@ class LobbyViewModel @Inject constructor(
         initialValue = LobbyUiState(),
     )
 
-    /**
-     * Captures the local player's current forward-facing heading as their aim offset.
-     *
-     * Called when the player points the phone forward and taps "Calibrate". The offset is
-     * stored locally and carried into the next round; it is never sent over the network.
-     */
-    fun calibrateAim() {
-        calibrationStore.capture(latestRawAzimuth)
+    private fun buildGreetingTargets(players: List<LobbyPlayer>, myId: Int): List<GreetingTarget> {
+        val me = players.firstOrNull { it.id == myId }
+        return players.filter { it.id != myId }.map { other ->
+            GreetingTarget(
+                id = other.id,
+                name = other.name,
+                iGreetedThem = me?.outgoingBearings?.containsKey(other.id) == true,
+                theyGreetedMe = other.outgoingBearings.containsKey(myId),
+            )
+        }
+    }
+
+    /** Arms the bow detector to capture a bow at [targetId]. */
+    fun armBow(targetId: Int) {
+        bowDetector.reset()
+        _armedTargetId.value = targetId
+    }
+
+    /** Cancels an in-progress bow capture. */
+    fun cancelBow() {
+        _armedTargetId.value = null
+        bowDetector.reset()
     }
 
     /** Changes the game mode (host only). */
     fun setMode(mode: GameMode) {
         session.setMode(mode)
-    }
-
-    /** Selects a seat cell on the 3×3 grid. */
-    fun chooseSeat(cell: Int) {
-        session.chooseSeat(cell)
     }
 
     /**
@@ -172,7 +211,7 @@ class LobbyViewModel @Inject constructor(
             session.startMatch()
             _startError.value = null
         } catch (e: IllegalStateException) {
-            _startError.update { e.message }
+            _startError.value = e.message
         }
     }
 

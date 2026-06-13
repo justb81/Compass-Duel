@@ -10,9 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import com.justb81.compassduel.R
 import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 
@@ -30,9 +28,9 @@ private const val SPRITE_INDEX_COMET = 3
 /**
  * Reusable chip-style badge for a lobby player.
  *
- * Displays the player's name, their chosen element or sprite (if any) as an
- * emoji indicator, and a seat number when assigned. The chip is tinted in the
- * primary container colour when the player is ready.
+ * Displays the player's name and their chosen element or sprite (if any) as an emoji
+ * indicator. The chip is tinted in the primary container colour when the player is ready
+ * (character picked and everyone greeted).
  *
  * @param player The lobby player to display.
  * @param modifier Modifier applied to the chip.
@@ -46,12 +44,6 @@ fun PlayerBadge(
         player.element != null -> elementEmoji(player.element)
         player.spriteId != null -> spriteEmoji(player.spriteId)
         else -> null
-    }
-
-    val seatLabel = if (player.seatCell != null) {
-        stringResource(R.string.player_badge_seat, player.seatCell + 1)
-    } else {
-        stringResource(R.string.player_badge_no_seat)
     }
 
     val containerColor = if (player.ready) {
@@ -69,12 +61,6 @@ fun PlayerBadge(
                     Spacer(modifier = Modifier.width(BADGE_LABEL_SPACING_DP.dp))
                 }
                 Text(text = player.name)
-                Spacer(modifier = Modifier.width(BADGE_LABEL_SPACING_DP.dp))
-                Text(
-                    text = seatLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
         },
         colors = AssistChipDefaults.assistChipColors(

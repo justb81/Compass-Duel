@@ -31,17 +31,19 @@
     <string name="lobby_title_client">Lobby</string>
     <string name="lobby_players_header">Players</string>
     <string name="lobby_mode_label">Game mode</string>
-    <string name="lobby_seat_header">Choose a seat</string>
     <string name="lobby_character_header">Choose your character</string>
     <string name="lobby_start_button">Start game</string>
     <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
 
-    <!-- Lobby — aim calibration -->
-    <string name="lobby_calibrate_header">Calibrate your aim</string>
-    <string name="lobby_calibrate_hint">Point your phone straight ahead at the play area, then tap to set your forward direction. You can do this now while everyone is ready — no rush once the round starts.</string>
-    <string name="lobby_calibrate_button">Point forward &amp; calibrate</string>
-    <string name="lobby_recalibrate_button">Calibrate again</string>
-    <string name="lobby_calibrated_label">✓ Aim calibrated</string>
+    <!-- Lobby — greeting handshake -->
+    <string name="lobby_greet_header">Greet your opponents</string>
+    <string name="lobby_greet_hint">Greet everyone at the table: tap a player, point your phone at them and bow (tilt it forward and back). They bow back to accept. This is how the game learns where you are sitting.</string>
+    <string name="lobby_greet_button">Bow</string>
+    <string name="lobby_greet_cancel">Cancel</string>
+    <string name="lobby_greet_pending">Greet %1$s</string>
+    <string name="lobby_greet_bow_now">Point at %1$s and bow…</string>
+    <string name="lobby_greet_waiting_back">Waiting for %1$s to bow back…</string>
+    <string name="lobby_greet_done">✓ Greeted</string>
 
     <!-- Lobby — transport errors -->
     <string name="lobby_error_host_failed">Couldn\'t start hosting. Make sure Bluetooth and Wi-Fi are on, then try again.</string>
@@ -52,11 +54,6 @@
     <string name="lobby_searching">Searching for nearby hosts…</string>
     <string name="lobby_no_hosts_found">No hosts found yet. Make sure the host has started a game.</string>
     <string name="lobby_connect_button">Connect</string>
-
-    <!-- Seat grid -->
-    <string name="seat_grid_cell_content_description">Seat %1$d</string>
-    <string name="seat_grid_cell_occupied">Seat %1$d — %2$s</string>
-    <string name="seat_grid_cell_mine">Seat %1$d — you</string>
 
     <!-- Element picker (Standard mode) -->
     <string name="element_fire">Fire</string>
@@ -70,12 +67,8 @@
     <string name="sprite_2">Sun</string>
     <string name="sprite_3">Comet</string>
 
-    <!-- Player badge -->
-    <string name="player_badge_seat">Seat %1$d</string>
-    <string name="player_badge_no_seat">No seat</string>
-
     <!-- Game screen -->
-    <string name="game_countdown_instruction">Hold your phone flat and point it forward</string>
+    <string name="game_countdown_instruction">Get ready — aim at your opponents!</string>
     <string name="game_round_over">Round over…</string>
     <string name="game_status_shielding">Shielding</string>
     <string name="game_status_resting">Resting…</string>

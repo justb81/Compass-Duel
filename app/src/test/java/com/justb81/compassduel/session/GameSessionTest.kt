@@ -279,7 +279,7 @@ class GameSessionTest {
     }
 
     @Test
-    fun `host receives SeatChosen and updates lobby`() = testScope.runTest {
+    fun `host receives Greeting and records the bearing on the lobby`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
         yield()
@@ -287,15 +287,18 @@ class GameSessionTest {
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
         yield()
 
-        transport.emitIncoming("client-ep", NetMessage.SeatChosen(cell = 3))
+        transport.emitIncoming(
+            "client-ep",
+            NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 137.5f),
+        )
         yield()
 
         val bob = session.lobby.value?.players?.find { it.name == "Bob" }
-        assertEquals(3, bob?.seatCell)
+        assertEquals(137.5f, bob?.outgoingBearings?.get(1))
     }
 
     @Test
-    fun `host receives CharacterChosen and marks player ready`() = testScope.runTest {
+    fun `host receives CharacterChosen and marks player ready once greeted`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
         yield()
@@ -306,9 +309,20 @@ class GameSessionTest {
         transport.emitIncoming("client-ep", NetMessage.CharacterChosen(element = Element.FIRE))
         yield()
 
+        // Character chosen but Bob has not greeted Alice yet — not ready.
+        val bobBeforeGreeting = session.lobby.value?.players?.find { it.name == "Bob" }
+        assertEquals(Element.FIRE, bobBeforeGreeting?.element)
+        assertFalse(bobBeforeGreeting?.ready == true)
+
+        // Once Bob greets the only other player he is ready.
+        transport.emitIncoming(
+            "client-ep",
+            NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f),
+        )
+        yield()
+
         val bob = session.lobby.value?.players?.find { it.name == "Bob" }
         assertTrue(bob?.ready == true)
-        assertEquals(Element.FIRE, bob?.element)
     }
 
     // ---------------------------------------------------------------------------
@@ -348,7 +362,6 @@ class GameSessionTest {
                     roundIndex = 0,
                     roundDurationSeconds = 90,
                     players = emptyList(),
-                    facingCaptureSeconds = 3,
                 ),
             )
             yield()
@@ -388,35 +401,44 @@ class GameSessionTest {
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `host chooseSeat updates lobby and does not send transport message`() = testScope.runTest {
+    fun `host submitBow records the bearing locally without a transport message`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        val countBefore = transport.sentMessages.size
         yield()
+        transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
+        yield()
+        val countBefore = transport.sentMessages.size
 
-        session.chooseSeat(cell = 2)
+        session.submitBow(toPlayerId = 2, bearingDegrees = 90f)
         yield()
 
         val alice = session.lobby.value?.players?.find { it.name == "Alice" }
-        assertEquals(2, alice?.seatCell)
-        // Host does not send SeatChosen over transport — it mutates local state directly
-        assertTrue(transport.sentMessages.drop(countBefore).none { it is NetMessage.SeatChosen })
+        assertEquals(90f, alice?.outgoingBearings?.get(2))
+        // Host does not send a Greeting over transport — it records local state directly.
+        assertTrue(transport.sentMessages.drop(countBefore).none { it is NetMessage.Greeting })
     }
 
     @Test
-    fun `client chooseSeat sends SeatChosen to host endpoint`() = testScope.runTest {
+    fun `client submitBow sends Greeting to host endpoint`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
         yield()
         session.connectTo("host-ep")
         yield()
-
-        session.chooseSeat(cell = 5)
+        // The client must know its own id before it can send a Greeting.
+        transport.emitIncoming(
+            "host-ep",
+            NetMessage.LobbyState(mode = GameMode.STANDARD, players = emptyList(), yourPlayerId = 2),
+        )
         yield()
 
-        val sent = transport.sentMessages.filterIsInstance<NetMessage.SeatChosen>()
-        assertTrue(sent.isNotEmpty()) { "Expected SeatChosen to be sent" }
-        assertEquals(5, sent.last().cell)
+        session.submitBow(toPlayerId = 1, bearingDegrees = 270f)
+        yield()
+
+        val sent = transport.sentMessages.filterIsInstance<NetMessage.Greeting>()
+        assertTrue(sent.isNotEmpty()) { "Expected Greeting to be sent" }
+        assertEquals(1, sent.last().toPlayerId)
+        assertEquals(270f, sent.last().bearingDegrees)
     }
 
     // ---------------------------------------------------------------------------
@@ -502,8 +524,8 @@ class GameSessionTest {
             transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
             yield()
 
-            session.chooseSeat(cell = 0)
-            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+            transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
             yield()
 
             session.chooseCharacter(spriteId = 0)
@@ -553,7 +575,6 @@ class GameSessionTest {
     fun `startMatch throws when fewer than 2 players`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        session.chooseSeat(cell = 0)
         session.chooseCharacter(element = Element.FIRE)
         yield()
 
@@ -614,8 +635,8 @@ class GameSessionTest {
             transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
             yield()
 
-            session.chooseSeat(cell = 0)
-            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+            transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
             yield()
 
             session.chooseCharacter(spriteId = 0)
@@ -665,7 +686,7 @@ class GameSessionTest {
     }
 
     @Test
-    fun `host rejects SeatChosen with out-of-range cell`() = testScope.runTest {
+    fun `host rejects Greeting with out-of-range bearing`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
         yield()
@@ -673,13 +694,15 @@ class GameSessionTest {
         transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
         yield()
 
-        val seatsBefore = session.lobby.value?.players?.map { it.seatCell }
-
-        // Cell 9 is outside the valid 0..8 range — should be silently rejected.
-        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 9))
+        // 400° is outside [0, 360) — should be silently rejected.
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 400f),
+        )
         yield()
 
-        assertEquals(seatsBefore, session.lobby.value?.players?.map { it.seatCell })
+        val bob = session.lobby.value?.players?.find { it.name == "Bob" }
+        assertTrue(bob?.outgoingBearings?.isEmpty() == true)
     }
 
     @Test
@@ -706,8 +729,8 @@ class GameSessionTest {
         transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
         yield()
 
-        session.chooseSeat(cell = 0)
-        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+        transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
         yield()
 
         session.chooseCharacter(spriteId = 0)
@@ -755,8 +778,8 @@ class GameSessionTest {
         transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
         yield()
 
-        session.chooseSeat(cell = 0)
-        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+        transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
         yield()
 
         session.chooseCharacter(spriteId = 0)
@@ -820,8 +843,8 @@ class GameSessionTest {
         transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
         yield()
 
-        session.chooseSeat(cell = 0)
-        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+        transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
         yield()
 
         session.chooseCharacter(spriteId = 0)
@@ -861,26 +884,66 @@ class GameSessionTest {
     }
 
     @Test
-    fun `host rejects SeatChosen for already-taken cell`() = testScope.runTest {
+    fun `startMatch requires every pair to greet, then succeeds`() = testScope.runTest {
         val session = buildSession()
-        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
         yield()
-
-        // Alice takes cell 2.
-        session.chooseSeat(cell = 2)
-        yield()
-
-        // Bob joins and attempts to take the same cell — must be rejected.
         transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
         yield()
-
-        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 2))
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
         yield()
 
-        // Bob's seat must still be null — the collision was rejected.
-        val bob = session.lobby.value?.players?.find { it.name == "Bob" }
-        assertNull(bob?.seatCell)
+        // Only the client has greeted the host so far — the matrix is incomplete.
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f),
+        )
+        yield()
+        org.junit.jupiter.api.assertThrows<IllegalStateException> { session.startMatch() }
+
+        // Host bows back — now every ordered pair is greeted and the match can start.
+        session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+        yield()
+        session.startMatch()
+        yield()
+
+        val roundStart = transport.sentMessages.filterIsInstance<NetMessage.RoundStart>().lastOrNull()
+        assertNotNull(roundStart)
+        assertEquals(180f, roundStart?.bearings?.get(1)?.get(2))
+        assertEquals(0f, roundStart?.bearings?.get(2)?.get(1))
     }
+
+    @Test
+    fun `PlayerMoved past forfeit threshold forfeits the player and invalidates bearings`() =
+        testScope.runTest {
+            var forfeitedId: Int? = null
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    object : NoOpEngine(rules, clk, scp) {
+                        override fun forfeitPlayer(playerId: Int) { forfeitedId = playerId }
+                    }
+                },
+            )
+            session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+            yield()
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+            session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+            transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
+            yield()
+            session.chooseCharacter(spriteId = 0)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+            yield()
+            session.startMatch()
+            yield()
+
+            // A significant-motion report immediately forfeits the client.
+            transport.emitIncoming("ep2", NetMessage.PlayerMoved(playerId = 2, significant = true))
+            yield()
+
+            assertEquals(2, forfeitedId)
+        }
 
     @Test
     fun `host truncates ClientHello name to 24 characters`() = testScope.runTest {
@@ -927,8 +990,8 @@ class GameSessionTest {
         transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
         yield()
 
-        session.chooseSeat(cell = 0)
-        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+        transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
         yield()
 
         session.chooseCharacter(spriteId = 0)
@@ -967,8 +1030,8 @@ class GameSessionTest {
             yield()
             transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
             yield()
-            session.chooseSeat(cell = 0)
-            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+            transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
             yield()
             session.chooseCharacter(spriteId = 0)
             transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
@@ -1016,8 +1079,8 @@ class GameSessionTest {
             yield()
             transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
             yield()
-            session.chooseSeat(cell = 0)
-            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+            transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
             yield()
             session.chooseCharacter(element = Element.FIRE)
             transport.emitIncoming("ep2", NetMessage.CharacterChosen(element = Element.WATER))
@@ -1086,7 +1149,6 @@ class GameSessionTest {
                     roundIndex = 1,
                     roundDurationSeconds = 90,
                     players = emptyList(),
-                    facingCaptureSeconds = 3,
                 ),
             )
             yield()
