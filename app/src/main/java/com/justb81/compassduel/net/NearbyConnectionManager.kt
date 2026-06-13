@@ -222,6 +222,13 @@ class NearbyConnectionManager @Inject constructor(
         }
     }
 
+    // This shim has no ack/retransmit of its own; reliability is added by
+    // [ReliableMessageTransport], which wraps this manager in production. These best-effort
+    // fallbacks keep the contract intact if the manager is ever used undecorated.
+    override fun sendReliable(endpointId: String, message: NetMessage) = send(endpointId, message)
+
+    override fun broadcastReliable(message: NetMessage) = broadcast(message)
+
     @Suppress("TooGenericExceptionCaught")
     override fun stopAll() {
         try {

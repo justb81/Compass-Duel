@@ -83,8 +83,21 @@ sealed interface SessionEvent {
     /** The host has initiated a rematch — return to the lobby screen. */
     data object RematchRequested : SessionEvent
 
-    /** A peer was lost (host disconnected on client; required client disconnected on host mid-round). */
+    /**
+     * A peer was lost and recovery failed: on the client the host stayed gone past the
+     * reconnect grace window; on the host a mid-round dropout left too few players to
+     * continue. Terminal — screens return to Home.
+     */
     data object PeerLost : SessionEvent
+
+    /**
+     * The link to the host was lost on the client and a reconnect attempt is in progress.
+     * Screens show a "reconnecting" overlay until [PeerReconnected] or [PeerLost] follows.
+     */
+    data object PeerReconnecting : SessionEvent
+
+    /** The client re-established the host link within the grace window; dismiss the overlay. */
+    data object PeerReconnected : SessionEvent
 
     /**
      * A player forfeited mid-match by leaving their seat; the host needs everyone to
@@ -124,6 +137,10 @@ fun interface GameEngineFactory {
  * the next round automatically. Kids mode plays a single round.
  *
  */
+// GameSession is a cohesive host/client networking facade (lobby, greeting, round lifecycle,
+// disconnect/reconnect orchestration). Splitting it would scatter tightly-coupled session state
+// across classes; the per-concern internal sections keep it navigable instead.
+@Suppress("LargeClass")
 @Singleton
 class GameSession @Inject constructor(
     private val transport: MessageTransport,
@@ -238,6 +255,27 @@ class GameSession @Inject constructor(
     private var matchScore: MatchScore = MatchScore()
     private var matchInProgress: Boolean = false
 
+    // --- Disconnect / reconnect grace (#65) ---
+
+    /**
+     * Host-side: players (id → display name) that dropped mid-match and whose seat is held
+     * open during a reconnect grace window. Their engine state is left untouched (they go
+     * idle) until they re-join or [HOST_RECONNECT_GRACE_MILLIS] elapses. Guarded by [lobbyLock].
+     */
+    private val reconnecting: MutableMap<Int, String> = mutableMapOf()
+
+    /** Host-side per-player grace timers that finalize the drop when reconnection times out. */
+    private val reconnectGraceJobs: MutableMap<Int, Job> = mutableMapOf()
+
+    /** Client-side grace timer; declares [SessionEvent.PeerLost] if the host stays gone. */
+    private var clientReconnectJob: Job? = null
+
+    /** Client-side: the host's advertised name, captured on connect, to re-match on rediscovery. */
+    private var hostName: String? = null
+
+    /** Client-side collector that re-requests the host connection once it is rediscovered. */
+    private var rediscoverJob: Job? = null
+
     // ---------------------------------------------------------------------------
     // Host API
     // ---------------------------------------------------------------------------
@@ -328,7 +366,7 @@ class GameSession @Inject constructor(
         // all state (#66 / #62).
         roundOverWaitJob?.cancel()
         roundOverWaitJob = null
-        transport.broadcast(NetMessage.Rematch)
+        transport.broadcastReliable(NetMessage.Rematch)
         val currentLobby = _lobby.value ?: return
         transport.acceptNewConnections = true
         matchInProgress = false
@@ -397,7 +435,7 @@ class GameSession @Inject constructor(
         if (!bearingDegrees.isFinite()) return
         when (_role.value) {
             SessionRole.HOST -> recordGreeting(HOST_PLAYER_ID, toPlayerId, bearingDegrees)
-            SessionRole.CLIENT -> transport.send(
+            SessionRole.CLIENT -> transport.sendReliable(
                 hostEndpointId ?: return,
                 NetMessage.Greeting(
                     fromPlayerId = _lobby.value?.yourPlayerId ?: return,
@@ -433,7 +471,7 @@ class GameSession @Inject constructor(
                 }
                 broadcastLobbyToAll(mode)
             }
-            SessionRole.CLIENT -> transport.send(
+            SessionRole.CLIENT -> transport.sendReliable(
                 hostEndpointId ?: return,
                 NetMessage.CharacterChosen(element = element, spriteId = spriteId),
             )
@@ -507,40 +545,141 @@ class GameSession @Inject constructor(
 
     private fun handleConnectionEvent(event: ConnectionEvent) {
         when (event) {
-            is ConnectionEvent.Connected -> {
-                if (_role.value == SessionRole.CLIENT && event.endpointId == hostEndpointId) {
-                    transport.send(event.endpointId, NetMessage.ClientHello(clientPlayerName))
-                }
-            }
+            is ConnectionEvent.Connected -> handleConnected(event)
             is ConnectionEvent.Disconnected -> handleDisconnection(event.endpointId)
+        }
+    }
+
+    private fun handleConnected(event: ConnectionEvent.Connected) {
+        if (_role.value != SessionRole.CLIENT || event.endpointId != hostEndpointId) return
+        // Remember the host's advertised name so a later reconnect can re-match it on discovery.
+        hostName = event.peerName
+        // (Re-)introduce ourselves; on a reconnect the host re-admits us by name.
+        transport.sendReliable(event.endpointId, NetMessage.ClientHello(clientPlayerName))
+        // A pending grace timer means this Connected completes a reconnect — dismiss the overlay.
+        if (clientReconnectJob != null) {
+            clientReconnectJob?.cancel()
+            clientReconnectJob = null
+            rediscoverJob?.cancel()
+            rediscoverJob = null
+            transport.stopDiscovery()
+            _sessionEvents.tryEmit(SessionEvent.PeerReconnected)
         }
     }
 
     private fun handleDisconnection(endpointId: String) {
         when (_role.value) {
-            SessionRole.HOST -> {
-                val playerId = endpointToPlayerId.remove(endpointId) ?: return
-                if (matchInProgress) {
-                    engine?.stop()
-                    _sessionEvents.tryEmit(SessionEvent.PeerLost)
-                } else {
-                    synchronized(lobbyLock) {
-                        lobbyPlayers.removeAll { it.id == playerId }
-                        bearingMatrix.remove(playerId)
-                        bearingMatrix.values.forEach { it.remove(playerId) }
-                    }
-                    movementSteps.remove(playerId)
-                    broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
-                }
-            }
-            SessionRole.CLIENT -> {
-                if (endpointId == hostEndpointId) {
-                    _sessionEvents.tryEmit(SessionEvent.PeerLost)
-                    reset()
-                }
-            }
+            SessionRole.HOST -> handleHostDisconnection(endpointId)
+            SessionRole.CLIENT -> handleClientDisconnection(endpointId)
             null -> Unit
         }
+    }
+
+    /**
+     * A client dropped. In the lobby they are removed immediately; mid-match their seat is held
+     * open for [HOST_RECONNECT_GRACE_MILLIS] (see [beginHostReconnectGrace]) so a transient blip
+     * does not forfeit them or abort an otherwise-viable round (#65).
+     */
+    private fun handleHostDisconnection(endpointId: String) {
+        val playerId = endpointToPlayerId.remove(endpointId) ?: return
+        if (matchInProgress) {
+            beginHostReconnectGrace(playerId)
+        } else {
+            removePlayerFromLobby(playerId)
+            broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+        }
+    }
+
+    /** Removes [playerId] and their bearings from the lobby roster. */
+    private fun removePlayerFromLobby(playerId: Int) {
+        synchronized(lobbyLock) {
+            lobbyPlayers.removeAll { it.id == playerId }
+            bearingMatrix.remove(playerId)
+            bearingMatrix.values.forEach { it.remove(playerId) }
+        }
+        movementSteps.remove(playerId)
+    }
+
+    /**
+     * Holds a mid-match dropout's seat open and starts a grace timer. The engine is left
+     * untouched (the player simply goes idle), and the host temporarily accepts new
+     * connections so the returning client can rejoin via [readmitReconnectingPlayer].
+     */
+    private fun beginHostReconnectGrace(playerId: Int) {
+        val held = synchronized(lobbyLock) {
+            val name = lobbyPlayers.firstOrNull { it.id == playerId }?.name
+            if (name != null) reconnecting[playerId] = name
+            name != null
+        }
+        if (!held) return
+        transport.acceptNewConnections = true
+        reconnectGraceJobs[playerId]?.cancel()
+        reconnectGraceJobs[playerId] = scope.launch {
+            delay(HOST_RECONNECT_GRACE_MILLIS)
+            finalizeHostDrop(playerId)
+        }
+    }
+
+    /**
+     * Reconnect window elapsed without the player returning: forfeit them and continue the
+     * round if at least [MIN_PLAYERS] remain, otherwise stop the engine and end the match.
+     */
+    private fun finalizeHostDrop(playerId: Int) {
+        reconnectGraceJobs.remove(playerId)
+        val remaining = synchronized(lobbyLock) {
+            reconnecting.remove(playerId)
+            lobbyPlayers.removeAll { it.id == playerId }
+            bearingMatrix.remove(playerId)
+            bearingMatrix.values.forEach { it.remove(playerId) }
+            lobbyPlayers.size
+        }
+        movementSteps.remove(playerId)
+        if (remaining >= MIN_PLAYERS) {
+            engine?.forfeitPlayer(playerId)
+            broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+        } else {
+            engine?.stop()
+            matchInProgress = false
+            _sessionEvents.tryEmit(SessionEvent.PeerLost)
+        }
+        if (matchInProgress && synchronized(lobbyLock) { reconnecting.isEmpty() }) {
+            transport.acceptNewConnections = false
+        }
+    }
+
+    /**
+     * The host link dropped on the client. Enter a reconnect grace window: re-discover the host
+     * and re-request the connection, declaring [SessionEvent.PeerLost] only if the link is not
+     * restored within [CLIENT_RECONNECT_GRACE_MILLIS] (#65).
+     */
+    private fun handleClientDisconnection(endpointId: String) {
+        if (endpointId != hostEndpointId || clientReconnectJob != null) return
+        _sessionEvents.tryEmit(SessionEvent.PeerReconnecting)
+        transport.startDiscovery()
+        rediscoverJob?.cancel()
+        rediscoverJob = scope.launch {
+            var requestedId: String? = null
+            transport.discoveredEndpoints.collect { endpoints ->
+                val host = endpoints.firstOrNull { it.name == hostName } ?: endpoints.firstOrNull()
+                if (host != null && host.endpointId != requestedId) {
+                    requestedId = host.endpointId
+                    hostEndpointId = host.endpointId
+                    transport.requestConnection(host.endpointId, clientPlayerName)
+                }
+            }
+        }
+        clientReconnectJob = scope.launch {
+            delay(CLIENT_RECONNECT_GRACE_MILLIS)
+            failClientReconnect()
+        }
+    }
+
+    private fun failClientReconnect() {
+        clientReconnectJob = null
+        rediscoverJob?.cancel()
+        rediscoverJob = null
+        _sessionEvents.tryEmit(SessionEvent.PeerLost)
+        reset()
     }
 
     private fun handleIncomingMessage(endpointId: String, message: NetMessage) {
@@ -560,6 +699,10 @@ class GameSession @Inject constructor(
             is NetMessage.RoundEnd,
             is NetMessage.Rematch,
             is NetMessage.Regreet,
+            // Transport-internal envelopes — unwrapped by ReliableMessageTransport before
+            // they reach the session, so receiving one here means a malformed peer; ignore.
+            is NetMessage.Reliable,
+            is NetMessage.ControlAck,
             -> Unit
             is NetMessage.ClientHello -> handleClientHello(endpointId, message)
             is NetMessage.Greeting -> handleGreeting(endpointId, message)
@@ -572,6 +715,12 @@ class GameSession @Inject constructor(
     private fun handleClientHello(endpointId: String, message: NetMessage.ClientHello) {
         // Truncate name to prevent unbounded data reaching game logic.
         val name = message.playerName.take(MAX_PLAYER_NAME_LENGTH)
+        // Mid-match, only a player whose seat is held in a reconnect window may (re-)join;
+        // brand-new joiners are ignored (#65).
+        if (matchInProgress) {
+            readmitReconnectingPlayer(endpointId, name)
+            return
+        }
         // The compound size-check → id-allocation → add must be atomic under lobbyLock
         // so concurrent ClientHello messages cannot both pass the size guard (#61).
         val added = synchronized(lobbyLock) {
@@ -586,6 +735,46 @@ class GameSession @Inject constructor(
             true
         }
         if (added) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    /**
+     * Re-admits a player who dropped mid-match and reconnected within their grace window: cancels
+     * the pending forfeit, restores their endpoint mapping, and resumes the in-flight round for
+     * them. A [ClientHello] whose name matches no held seat is a brand-new joiner and is ignored.
+     */
+    private fun readmitReconnectingPlayer(endpointId: String, name: String) {
+        val playerId = synchronized(lobbyLock) {
+            reconnecting.entries.firstOrNull { it.value == name }?.key
+        } ?: return
+        synchronized(lobbyLock) { reconnecting.remove(playerId) }
+        reconnectGraceJobs.remove(playerId)?.cancel()
+        endpointToPlayerId[endpointId] = playerId
+        if (synchronized(lobbyLock) { reconnecting.isEmpty() }) {
+            transport.acceptNewConnections = false
+        }
+        resumeRoundFor(endpointId)
+    }
+
+    /** Brings a reconnected client back up to date: current lobby plus a fresh round-start. */
+    private fun resumeRoundFor(endpointId: String) {
+        val lobby = _lobby.value ?: return
+        broadcastLobbyToAll(lobby.mode)
+        val matrix: Map<Int, Map<Int, Float>>
+        val players: List<LobbyPlayer>
+        synchronized(lobbyLock) {
+            matrix = bearingMatrix.mapValues { it.value.toMap() }
+            players = lobbyPlayers.toList()
+        }
+        transport.sendReliable(
+            endpointId,
+            NetMessage.RoundStart(
+                mode = lobby.mode,
+                roundIndex = roundIndex,
+                roundDurationSeconds = ruleSetFor(lobby.mode).roundDurationSeconds,
+                players = players,
+                bearings = matrix,
+            ),
+        )
     }
 
     private fun handleGreeting(endpointId: String, message: NetMessage.Greeting) {
@@ -714,11 +903,13 @@ class GameSession @Inject constructor(
     // Internal — engine management (host only)
     // ---------------------------------------------------------------------------
 
+    private fun ruleSetFor(mode: GameMode): ModeRuleSet = when (mode) {
+        GameMode.STANDARD -> StandardRuleSet()
+        GameMode.KIDS -> KidsRuleSet()
+    }
+
     private fun startRoundInternal(mode: GameMode, players: List<LobbyPlayer>) {
-        val rules: ModeRuleSet = when (mode) {
-            GameMode.STANDARD -> StandardRuleSet()
-            GameMode.KIDS -> KidsRuleSet()
-        }
+        val rules: ModeRuleSet = ruleSetFor(mode)
 
         val matrix = synchronized(lobbyLock) { bearingMatrix.mapValues { it.value.toMap() } }
         val roundStart = NetMessage.RoundStart(
@@ -728,7 +919,7 @@ class GameSession @Inject constructor(
             players = players,
             bearings = matrix,
         )
-        transport.broadcast(roundStart)
+        transport.broadcastReliable(roundStart)
         _myBearings.value = matrix[HOST_PLAYER_ID].orEmpty()
         _sessionEvents.tryEmit(SessionEvent.RoundStarted)
 
@@ -782,7 +973,7 @@ class GameSession @Inject constructor(
 
             val roundEnd = buildRoundEnd(mode) ?: return@launch
             _roundEnd.value = roundEnd
-            transport.broadcast(roundEnd)
+            transport.broadcastReliable(roundEnd)
 
             when (mode) {
                 GameMode.STANDARD -> {
@@ -815,7 +1006,7 @@ class GameSession @Inject constructor(
             startRoundInternal(currentLobby.mode, players)
         } else {
             awaitingRegreet = true
-            transport.broadcast(NetMessage.Regreet)
+            transport.broadcastReliable(NetMessage.Regreet)
             broadcastLobbyToAll(currentLobby.mode)
             _sessionEvents.tryEmit(SessionEvent.RegreetRequired)
         }
@@ -908,7 +1099,7 @@ class GameSession @Inject constructor(
             yourBearings = matrix[HOST_PLAYER_ID].orEmpty(),
         )
         endpointToPlayerId.forEach { (endpointId, playerId) ->
-            transport.send(
+            transport.sendReliable(
                 endpointId,
                 NetMessage.LobbyState(
                     mode = mode,
@@ -976,6 +1167,13 @@ class GameSession @Inject constructor(
         messageJob = null
         connectionJob?.cancel()
         connectionJob = null
+        // Cancel any in-flight reconnect grace (host per-player timers + client grace/rediscovery).
+        reconnectGraceJobs.values.forEach { it.cancel() }
+        reconnectGraceJobs.clear()
+        clientReconnectJob?.cancel()
+        clientReconnectJob = null
+        rediscoverJob?.cancel()
+        rediscoverJob = null
         engine?.stop()
         engine = null
         _role.value = null
@@ -986,6 +1184,7 @@ class GameSession @Inject constructor(
         synchronized(lobbyLock) {
             lobbyPlayers.clear()
             bearingMatrix.clear()
+            reconnecting.clear()
         }
         movementSteps.clear()
         awaitingRegreet = false
@@ -993,6 +1192,7 @@ class GameSession @Inject constructor(
         localPlayerName = ""
         clientPlayerName = ""
         hostEndpointId = null
+        hostName = null
         roundIndex = 0
         matchScore = MatchScore()
         matchInProgress = false
@@ -1014,5 +1214,17 @@ class GameSession @Inject constructor(
 
         /** Delay (ms) between RoundEnd and auto-starting the next round in standard mode. */
         private const val NEXT_ROUND_DELAY_MILLIS = 3_000L
+
+        /**
+         * How long the host holds a mid-match dropout's seat open before forfeiting them (#65).
+         * Covers a transient Nearby blip so the player can rejoin without losing the round.
+         */
+        private const val HOST_RECONNECT_GRACE_MILLIS = 8_000L
+
+        /**
+         * How long the client tries to re-establish a lost host link before giving up and
+         * declaring [SessionEvent.PeerLost] (#65).
+         */
+        private const val CLIENT_RECONNECT_GRACE_MILLIS = 8_000L
     }
 }
