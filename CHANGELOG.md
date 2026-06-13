@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/justb81/Compass-Duel/compare/v0.3.2...v0.4.0) (2026-06-13)
+
+
+### Features
+
+* **crash:** capture uncaught exceptions and surface them on next launch ([#22](https://github.com/justb81/Compass-Duel/issues/22)) ([45b78f8](https://github.com/justb81/Compass-Duel/commit/45b78f8110a57b1c88379326137e95814bc8adfa))
+
 ## [0.3.2](https://github.com/justb81/Compass-Duel/compare/v0.3.1...v0.3.2) (2026-06-13)
 
 
