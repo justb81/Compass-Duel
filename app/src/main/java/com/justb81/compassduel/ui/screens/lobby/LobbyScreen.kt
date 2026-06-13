@@ -18,6 +18,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -42,6 +43,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justb81.compassduel.R
 import com.justb81.compassduel.game.Element
+import com.justb81.compassduel.game.gesture.BowDetector
+import com.justb81.compassduel.game.gesture.BowThresholds
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
@@ -96,6 +99,7 @@ fun LobbyScreen(
     viewModel: LobbyViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val bowFeedback by viewModel.bowFeedback.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.startError) {
@@ -149,6 +153,7 @@ fun LobbyScreen(
             else -> {
                 LobbyContent(
                     uiState = uiState,
+                    bowFeedback = bowFeedback,
                     isHost = isHost,
                     onSetMode = viewModel::setMode,
                     onArmBow = viewModel::armBow,
@@ -218,6 +223,7 @@ private fun DiscoveredHostRow(
 @Composable
 private fun LobbyContent(
     uiState: LobbyUiState,
+    bowFeedback: BowFeedback?,
     isHost: Boolean,
     onSetMode: (GameMode) -> Unit,
     onArmBow: (Int) -> Unit,
@@ -265,6 +271,7 @@ private fun LobbyContent(
         GreetingSection(
             targets = uiState.greetingTargets,
             armedTargetId = uiState.armedTargetId,
+            bowFeedback = bowFeedback,
             onArmBow = onArmBow,
             onCancelBow = onCancelBow,
         )
@@ -330,6 +337,7 @@ private fun LobbyActionRow(
 private fun GreetingSection(
     targets: List<GreetingTarget>,
     armedTargetId: Int?,
+    bowFeedback: BowFeedback?,
     onArmBow: (Int) -> Unit,
     onCancelBow: () -> Unit,
     modifier: Modifier = Modifier,
@@ -344,9 +352,11 @@ private fun GreetingSection(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         targets.forEach { target ->
+            val isArmed = target.id == armedTargetId
             GreetingTargetRow(
                 target = target,
-                isArmed = target.id == armedTargetId,
+                isArmed = isArmed,
+                bowFeedback = if (isArmed) bowFeedback else null,
                 onArmBow = { onArmBow(target.id) },
                 onCancelBow = onCancelBow,
             )
@@ -358,6 +368,7 @@ private fun GreetingSection(
 private fun GreetingTargetRow(
     target: GreetingTarget,
     isArmed: Boolean,
+    bowFeedback: BowFeedback?,
     onArmBow: () -> Unit,
     onCancelBow: () -> Unit,
 ) {
@@ -367,26 +378,58 @@ private fun GreetingTargetRow(
         isArmed -> stringResource(R.string.lobby_greet_bow_now, target.name)
         else -> stringResource(R.string.lobby_greet_pending, target.name)
     }
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(ITEM_SPACING_DP),
-    ) {
-        Text(
-            text = statusText,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.weight(1f),
-        )
-        when {
-            target.iGreetedThem -> Unit
-            isArmed -> OutlinedButton(onClick = onCancelBow) {
-                Text(text = stringResource(R.string.lobby_greet_cancel))
-            }
-            else -> Button(onClick = onArmBow) {
-                Text(text = stringResource(R.string.lobby_greet_button))
+    Column(verticalArrangement = Arrangement.spacedBy(BADGE_SPACING_DP)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(ITEM_SPACING_DP),
+        ) {
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            when {
+                target.iGreetedThem -> Unit
+                isArmed -> OutlinedButton(onClick = onCancelBow) {
+                    Text(text = stringResource(R.string.lobby_greet_cancel))
+                }
+                else -> Button(onClick = onArmBow) {
+                    Text(text = stringResource(R.string.lobby_greet_button))
+                }
             }
         }
+        if (isArmed) {
+            BowProgress(target = target, bowFeedback = bowFeedback)
+        }
     }
+}
+
+/**
+ * Live tilt indicator shown while a target is armed: a progress bar that fills as the
+ * phone is tilted toward the deep bow threshold, plus phase-appropriate guidance.
+ */
+@Composable
+private fun BowProgress(
+    target: GreetingTarget,
+    bowFeedback: BowFeedback?,
+) {
+    val pitch = bowFeedback?.pitchDegrees ?: 0f
+    val progress = (pitch / BowThresholds.BOW_DEEP_PITCH_DEGREES).coerceIn(0f, 1f)
+    val guidance = when (bowFeedback?.phase) {
+        BowDetector.Phase.ASCENDING -> stringResource(R.string.lobby_greet_phase_rise)
+        BowDetector.Phase.DESCENDING -> stringResource(R.string.lobby_greet_phase_tilting)
+        else -> stringResource(R.string.lobby_greet_phase_aim, target.name)
+    }
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier.fillMaxWidth(),
+    )
+    Text(
+        text = guidance,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 }
 
 @Composable

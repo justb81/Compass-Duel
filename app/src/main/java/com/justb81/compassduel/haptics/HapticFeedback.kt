@@ -92,6 +92,28 @@ class HapticFeedback @Inject constructor(
         vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK))
     }
 
+    /**
+     * Light tick: a greeting bow just reached the deep threshold — the player has
+     * tilted far enough and can now raise the phone to complete the bow.
+     *
+     * Mode-neutral: greeting happens in the lobby, before combat. Fires at most
+     * once per bow (only on the deep-threshold transition).
+     */
+    fun greetingDeep() {
+        if (!vibrator.hasVibrator()) return
+        vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_TICK))
+    }
+
+    /**
+     * Confirming double-click: a complete greeting bow was captured.
+     *
+     * Mode-neutral: greeting happens in the lobby, before combat.
+     */
+    fun greetingBowed() {
+        if (!vibrator.hasVibrator()) return
+        vibrator.vibrate(VibrationEffect.createPredefined(VibrationEffect.EFFECT_DOUBLE_CLICK))
+    }
+
     // -------------------------------------------------------------------------
     // Rate-limit state
     // -------------------------------------------------------------------------

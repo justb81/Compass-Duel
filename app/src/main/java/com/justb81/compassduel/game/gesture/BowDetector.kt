@@ -42,11 +42,6 @@ object BowThresholds {
 }
 
 /**
- * Internal bow recognition phase.
- */
-private enum class BowPhase { IDLE, DESCENDING, ASCENDING }
-
-/**
  * Pure, sensor-free classifier that recognises a "bow to greet" gesture and reports
  * the azimuth the phone was pointing at when the bow began.
  *
@@ -61,7 +56,18 @@ private enum class BowPhase { IDLE, DESCENDING, ASCENDING }
  */
 class BowDetector {
 
-    private var phase: BowPhase = BowPhase.IDLE
+    /**
+     * Live recognition phase, exposed read-only so the UI can give the player feedback
+     * while a bow is in progress:
+     * - [IDLE]: aiming (waiting for the forward tilt to cross the onset threshold).
+     * - [DESCENDING]: the bow has started; tilting toward the deep threshold.
+     * - [ASCENDING]: the deep threshold was reached; rise back up to complete the bow.
+     */
+    enum class Phase { IDLE, DESCENDING, ASCENDING }
+
+    /** Current recognition phase; mutated only by [onSample]/[reset]. */
+    var phase: Phase = Phase.IDLE
+        private set
 
     /** Most recent azimuth observed while in the aiming posture (frozen at onset). */
     private var aimedAzimuth: Float = 0f
@@ -79,16 +85,16 @@ class BowDetector {
      *   this sample, or null otherwise.
      */
     fun onSample(sample: BowSample): Float? = when (phase) {
-        BowPhase.IDLE -> onIdle(sample)
-        BowPhase.DESCENDING -> onDescending(sample)
-        BowPhase.ASCENDING -> onAscending(sample)
+        Phase.IDLE -> onIdle(sample)
+        Phase.DESCENDING -> onDescending(sample)
+        Phase.ASCENDING -> onAscending(sample)
     }
 
     private fun onIdle(sample: BowSample): Float? {
         if (sample.pitchDegrees >= BowThresholds.BOW_ONSET_PITCH_DEGREES) {
             capturedAzimuth = aimedAzimuth
             onsetMillis = sample.timestampMillis
-            phase = BowPhase.DESCENDING
+            phase = Phase.DESCENDING
         } else {
             // Still aimed (upright) — remember the heading so onset can freeze it.
             aimedAzimuth = sample.azimuthDegrees
@@ -102,7 +108,7 @@ class BowDetector {
             return null
         }
         if (sample.pitchDegrees >= BowThresholds.BOW_DEEP_PITCH_DEGREES) {
-            phase = BowPhase.ASCENDING
+            phase = Phase.ASCENDING
         }
         return null
     }
@@ -126,7 +132,7 @@ class BowDetector {
 
     /** Resets the detector to its idle state so it can capture a fresh bow. */
     fun reset() {
-        phase = BowPhase.IDLE
+        phase = Phase.IDLE
         onsetMillis = 0L
     }
 

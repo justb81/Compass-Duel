@@ -64,6 +64,24 @@ class BowDetectorTest {
     }
 
     @Test
+    fun `phase advances IDLE to DESCENDING to ASCENDING and returns to IDLE on capture`() {
+        assertEquals(BowDetector.Phase.IDLE, detector.phase)
+
+        detector.onSample(sample(t = 0, pitch = 0f, azimuth = 137f)) // aiming
+        assertEquals(BowDetector.Phase.IDLE, detector.phase)
+
+        detector.onSample(sample(t = 50, pitch = 40f, azimuth = 120f)) // onset
+        assertEquals(BowDetector.Phase.DESCENDING, detector.phase)
+
+        detector.onSample(sample(t = 100, pitch = 70f, azimuth = 90f)) // deep
+        assertEquals(BowDetector.Phase.ASCENDING, detector.phase)
+
+        val captured = detector.onSample(sample(t = 300, pitch = 10f, azimuth = 137f)) // rise
+        assertEquals(137f, captured!!, aimDelta)
+        assertEquals(BowDetector.Phase.IDLE, detector.phase)
+    }
+
+    @Test
     fun `reset allows a second capture for greeting another opponent`() {
         val first = feed(
             sample(t = 0, pitch = 0f, azimuth = 30f),

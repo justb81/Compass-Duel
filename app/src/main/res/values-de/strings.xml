@@ -42,6 +42,9 @@
     <string name="lobby_greet_cancel">Abbrechen</string>
     <string name="lobby_greet_pending">%1$s begrüßen</string>
     <string name="lobby_greet_bow_now">Auf %1$s zeigen und verbeugen …</string>
+    <string name="lobby_greet_phase_aim">Auf %1$s zielen, dann nach vorne kippen</string>
+    <string name="lobby_greet_phase_tilting">Weiter nach vorne kippen …</string>
+    <string name="lobby_greet_phase_rise">Jetzt das Handy wieder aufrichten</string>
     <string name="lobby_greet_waiting_back">Warte auf Verbeugung von %1$s …</string>
     <string name="lobby_greet_done">✓ Begrüßt</string>
 
