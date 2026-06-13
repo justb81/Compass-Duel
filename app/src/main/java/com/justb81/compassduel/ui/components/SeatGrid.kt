@@ -4,11 +4,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -25,7 +25,7 @@ import com.justb81.compassduel.R
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 
 private const val GRID_COLUMN_COUNT = 3
-private const val GRID_TOTAL_CELLS = 9
+private const val GRID_ROW_COUNT = 3
 private const val CELL_BORDER_WIDTH_DP = 2
 private const val CELL_PADDING_DP = 4
 private const val GRID_SPACING_DP = 6
@@ -60,21 +60,31 @@ fun SeatGrid(
 
     val myCurrentSeat: Int? = players.firstOrNull { it.id == myPlayerId }?.seatCell
 
-    LazyVerticalGrid(
-        columns = GridCells.Fixed(GRID_COLUMN_COUNT),
+    // A plain Column/Row grid (not LazyVerticalGrid): the grid is a fixed 3×3 of
+    // nine cells and is hosted inside a vertically-scrolling lobby Column. A lazy
+    // (vertically scrollable) grid nested in a verticalScroll parent receives
+    // infinite height constraints and crashes at measure time.
+    Column(
         modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(GRID_SPACING_DP.dp),
         verticalArrangement = Arrangement.spacedBy(GRID_SPACING_DP.dp),
-        userScrollEnabled = false,
     ) {
-        items(GRID_TOTAL_CELLS) { cell ->
-            SeatCell(
-                cell = cell,
-                occupant = seatToPlayer[cell],
-                isMyCurrentSeat = cell == myCurrentSeat,
-                myPlayerId = myPlayerId,
-                onCellSelected = onCellSelected,
-            )
+        for (rowIndex in 0 until GRID_ROW_COUNT) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(GRID_SPACING_DP.dp),
+            ) {
+                for (columnIndex in 0 until GRID_COLUMN_COUNT) {
+                    val cell = rowIndex * GRID_COLUMN_COUNT + columnIndex
+                    SeatCell(
+                        cell = cell,
+                        occupant = seatToPlayer[cell],
+                        isMyCurrentSeat = cell == myCurrentSeat,
+                        myPlayerId = myPlayerId,
+                        onCellSelected = onCellSelected,
+                        modifier = Modifier.weight(1f),
+                    )
+                }
+            }
         }
     }
 }
@@ -86,6 +96,7 @@ private fun SeatCell(
     isMyCurrentSeat: Boolean,
     myPlayerId: Int,
     onCellSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val isMine = occupant?.id == myPlayerId
     val isOccupiedByOther = occupant != null && !isMine
@@ -115,7 +126,7 @@ private fun SeatCell(
     Surface(
         color = containerColor,
         shape = MaterialTheme.shapes.small,
-        modifier = Modifier
+        modifier = modifier
             .aspectRatio(1f)
             .border(
                 width = borderWidth,
