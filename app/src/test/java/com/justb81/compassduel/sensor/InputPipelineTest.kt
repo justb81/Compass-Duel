@@ -37,6 +37,15 @@ class InputPipelineTest {
     private fun upright(azimuth: Float = 0f) =
         OrientationSample(azimuthDegrees = azimuth, pitchDegrees = 0f, rollDegrees = 0f, accuracy = 3)
 
+    /**
+     * A clock that advances [stepMillis] on every call, so successive merged samples carry
+     * increasing timestamps deterministically (independent of coroutine interleaving).
+     */
+    private fun steppingClock(stepMillis: Long) = object : GameClock {
+        private var calls = 0
+        override fun nowMillis(): Long = START_TIME + calls++ * stepMillis
+    }
+
     // ---------------------------------------------------------------------------
     // Cadence emission — shield state
     // ---------------------------------------------------------------------------
@@ -64,18 +73,14 @@ class InputPipelineTest {
     @Test
     fun `cadence emits SHIELD once the upright-steady hold completes`() = runTest {
         val outputs = mutableListOf<NetMessage.PlayerInput>()
-
-        val orientationFlow = flow {
-            testClock.time = START_TIME
-            emit(upright())
-            testClock.time = START_TIME + GestureThresholds.SHIELD_HOLD_MILLIS
-            emit(upright())
-        }
+        // Stamp each successive sample one hold-window apart so the 2nd activates the shield.
+        // (A stepping clock avoids relying on merge interleaving to advance time.)
+        val clock = steppingClock(GestureThresholds.SHIELD_HOLD_MILLIS)
 
         InputPipeline.processSamples(
-            orientationFlow = orientationFlow,
+            orientationFlow = flow { emit(upright()); emit(upright()) },
             accelFlow = emptyFlow(),
-            clock = testClock,
+            clock = clock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
             calibration = zeroCalibration,
@@ -136,18 +141,12 @@ class InputPipelineTest {
     @Test
     fun `onShieldArmProgress reports full progress once the shield activates`() = runTest {
         val progresses = mutableListOf<Float>()
-
-        val orientationFlow = flow {
-            testClock.time = START_TIME
-            emit(upright())
-            testClock.time = START_TIME + GestureThresholds.SHIELD_HOLD_MILLIS
-            emit(upright())
-        }
+        val clock = steppingClock(GestureThresholds.SHIELD_HOLD_MILLIS)
 
         InputPipeline.processSamples(
-            orientationFlow = orientationFlow,
+            orientationFlow = flow { emit(upright()); emit(upright()) },
             accelFlow = emptyFlow(),
-            clock = testClock,
+            clock = clock,
             playerId = PLAYER_ID,
             mode = GameMode.STANDARD,
             calibration = zeroCalibration,
