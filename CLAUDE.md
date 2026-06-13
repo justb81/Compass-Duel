@@ -158,6 +158,12 @@ description and treat a red `Test & Build` check as a blocker. Do **not** pass
 - Merging the release-please PR tags a release and triggers `release.yml`:
   signed APK + AAB → GitHub Release (with native debug symbols + R8 mapping) and
   the Play Store **internal** track via Gradle Play Publisher.
+- The release job resolves an NDK (newest pre-installed on the runner, else a
+  pinned `sdkmanager` install) and exports `ANDROID_NDK_VERSION`. The app has no
+  native sources, but AGP needs the NDK's `objcopy` to extract native debug
+  symbols from dependency `.so` files (e.g. play-services) and embed them in the
+  AAB; without it the symbols are silently never generated and Play Console
+  flags the bundle as missing debug symbols.
 
 ### Required CI secrets
 
