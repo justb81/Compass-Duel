@@ -14,6 +14,7 @@ import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
+import com.justb81.compassduel.net.protocol.PlayerAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -26,6 +27,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -85,6 +87,7 @@ private class FakeTransport : MessageTransport {
     var discoveryStarted: Boolean = false
     var discoveryStopped: Boolean = false
     var allStopped: Boolean = false
+    override var acceptNewConnections: Boolean = true
 
     override fun startAdvertising(localName: String) { advertisingStarted = true }
     override fun startDiscovery() { discoveryStarted = true }
@@ -526,6 +529,389 @@ class GameSessionTest {
         org.junit.jupiter.api.assertThrows<IllegalStateException> {
             session.startMatch()
         }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Security: host trust boundary (#39 - #43)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `host ignores PlayerInput from unmapped endpoint`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // "unknown-ep" has never sent ClientHello, so it is not in endpointToPlayerId.
+        // The input should be silently dropped — no exception thrown.
+        transport.emitIncoming(
+            "unknown-ep",
+            NetMessage.PlayerInput(
+                playerId = 99,
+                aimDegrees = 0f,
+                pitchDegrees = 0f,
+                action = PlayerAction.IDLE,
+            ),
+        )
+        yield()
+
+        // Session remains in the initial lobby state — no crash, no state corruption.
+        assertEquals(1, session.lobby.value?.players?.size)
+    }
+
+    @Test
+    fun `host ignores PlayerInput with mismatched playerId — uses trusted mapped id`() =
+        testScope.runTest {
+            var capturedPlayerId: Int? = null
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    object : NoOpEngine(rules, clk, scp) {
+                        override fun submitInput(
+                            playerId: Int,
+                            aimDegrees: Float,
+                            isShielding: Boolean,
+                            action: PlayerAction?,
+                        ) {
+                            capturedPlayerId = playerId
+                        }
+                    }
+                },
+            )
+
+            session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+            yield()
+
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+
+            session.chooseSeat(cell = 0)
+            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            yield()
+
+            session.chooseCharacter(spriteId = 0)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+            yield()
+
+            session.startMatch()
+            yield()
+
+            // Bob is mapped to id 2. Send a PlayerInput claiming id 99 — host must ignore the
+            // client-supplied id and use the trusted mapped id (2) instead.
+            transport.emitIncoming(
+                "ep2",
+                NetMessage.PlayerInput(
+                    playerId = 99,
+                    aimDegrees = 45f,
+                    pitchDegrees = 0f,
+                    action = PlayerAction.IDLE,
+                ),
+            )
+            yield()
+
+            assertEquals(2, capturedPlayerId)
+        }
+
+    @Test
+    fun `client ignores message not from host endpoint`() = testScope.runTest {
+        val session = buildSession()
+        session.joinLobby(playerName = "Bob")
+        yield()
+        session.connectTo("host-ep")
+        yield()
+
+        // Inject a LobbyState from a different (untrusted) endpoint.
+        transport.emitIncoming(
+            "rogue-ep",
+            NetMessage.LobbyState(
+                mode = GameMode.KIDS,
+                players = emptyList(),
+                yourPlayerId = 2,
+            ),
+        )
+        yield()
+
+        // Client should have ignored the rogue message — lobby must remain null.
+        assertNull(session.lobby.value)
+    }
+
+    @Test
+    fun `host rejects SeatChosen with out-of-range cell`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        val seatsBefore = session.lobby.value?.players?.map { it.seatCell }
+
+        // Cell 9 is outside the valid 0..8 range — should be silently rejected.
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 9))
+        yield()
+
+        assertEquals(seatsBefore, session.lobby.value?.players?.map { it.seatCell })
+    }
+
+    @Test
+    fun `host rejects PlayerInput with non-finite aimDegrees`() = testScope.runTest {
+        var inputReached = false
+        val session = buildSession(
+            engineFactory = GameEngineFactory { rules, clk, scp ->
+                object : NoOpEngine(rules, clk, scp) {
+                    override fun submitInput(
+                        playerId: Int,
+                        aimDegrees: Float,
+                        isShielding: Boolean,
+                        action: PlayerAction?,
+                    ) {
+                        inputReached = true
+                    }
+                }
+            },
+        )
+
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        session.startMatch()
+        yield()
+
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.PlayerInput(
+                playerId = 2,
+                aimDegrees = Float.POSITIVE_INFINITY,
+                pitchDegrees = 0f,
+                action = PlayerAction.IDLE,
+            ),
+        )
+        yield()
+
+        assertFalse(inputReached, "Engine must not receive input with non-finite aimDegrees")
+    }
+
+    @Test
+    fun `host rejects PlayerInput with NaN pitchDegrees`() = testScope.runTest {
+        var inputReached = false
+        val session = buildSession(
+            engineFactory = GameEngineFactory { rules, clk, scp ->
+                object : NoOpEngine(rules, clk, scp) {
+                    override fun submitInput(
+                        playerId: Int,
+                        aimDegrees: Float,
+                        isShielding: Boolean,
+                        action: PlayerAction?,
+                    ) {
+                        inputReached = true
+                    }
+                }
+            },
+        )
+
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        session.startMatch()
+        yield()
+
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.PlayerInput(
+                playerId = 2,
+                aimDegrees = 45f,
+                pitchDegrees = Float.NaN,
+                action = PlayerAction.IDLE,
+            ),
+        )
+        yield()
+
+        assertFalse(inputReached, "Engine must not receive input with NaN pitchDegrees")
+    }
+
+    @Test
+    fun `id allocation does not collide after a disconnect`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // Two clients connect.
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+        transport.emitIncoming("ep3", NetMessage.ClientHello("Carol"))
+        yield()
+
+        val idsBefore = session.lobby.value?.players?.map { it.id }?.toSet()
+        assertEquals(3, idsBefore?.size, "Expected 3 distinct ids before disconnect")
+
+        // Bob (ep2) disconnects.
+        transport.emitConnection(ConnectionEvent.Disconnected("ep2"))
+        yield()
+
+        // A new client connects — must receive the lowest unused id (2), not a duplicate.
+        transport.emitIncoming("ep4", NetMessage.ClientHello("Dave"))
+        yield()
+
+        val idsAfter = session.lobby.value?.players?.map { it.id }
+        assertEquals(idsAfter?.size, idsAfter?.toSet()?.size, "Player ids must be unique after rejoin")
+
+        // Dave should receive id 2 (lowest unused after Bob left).
+        val daveId = session.lobby.value?.players?.find { it.name == "Dave" }?.id
+        assertEquals(2, daveId)
+    }
+
+    @Test
+    fun `transport acceptNewConnections is false after startMatch`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        assertTrue(transport.acceptNewConnections)
+
+        session.startMatch()
+        yield()
+
+        assertFalse(transport.acceptNewConnections)
+    }
+
+    @Test
+    fun `host rejects ClientHello when lobby is full`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // Fill the lobby to MAX_PLAYERS (4 total: 1 host + 3 clients).
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+        transport.emitIncoming("ep3", NetMessage.ClientHello("Carol"))
+        yield()
+        transport.emitIncoming("ep4", NetMessage.ClientHello("Dave"))
+        yield()
+
+        assertEquals(4, session.lobby.value?.players?.size)
+
+        // A fifth player tries to join — must be rejected.
+        transport.emitIncoming("ep5", NetMessage.ClientHello("Eve"))
+        yield()
+
+        assertEquals(4, session.lobby.value?.players?.size)
+        assertNull(session.lobby.value?.players?.find { it.name == "Eve" })
+    }
+
+    @Test
+    fun `host rejects SeatChosen for already-taken cell`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // Alice takes cell 2.
+        session.chooseSeat(cell = 2)
+        yield()
+
+        // Bob joins and attempts to take the same cell — must be rejected.
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 2))
+        yield()
+
+        // Bob's seat must still be null — the collision was rejected.
+        val bob = session.lobby.value?.players?.find { it.name == "Bob" }
+        assertNull(bob?.seatCell)
+    }
+
+    @Test
+    fun `host truncates ClientHello name to 24 characters`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        val longName = "A".repeat(50)
+        transport.emitIncoming("ep2", NetMessage.ClientHello(longName))
+        yield()
+
+        val newPlayer = session.lobby.value?.players?.find { it.name.length <= 24 && it.name != "Alice" }
+        assertNotNull(newPlayer)
+        assertEquals(24, newPlayer!!.name.length)
+        assertEquals("A".repeat(24), newPlayer.name)
+    }
+
+    @Test
+    fun `host rejects host-direction messages sent by clients`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // These message types are only valid host→client; a client sending them must be ignored.
+        val lobbySize = session.lobby.value?.players?.size
+
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.LobbyState(mode = GameMode.KIDS, players = emptyList(), yourPlayerId = 99),
+        )
+        yield()
+
+        // Lobby must be unaffected — the host's own LobbyState should remain.
+        assertEquals(lobbySize, session.lobby.value?.players?.size)
+        assertEquals(GameMode.STANDARD, session.lobby.value?.mode)
+    }
+
+    @Test
+    fun `transport acceptNewConnections is true after requestRematch`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        session.startMatch()
+        yield()
+        assertFalse(transport.acceptNewConnections)
+
+        session.requestRematch()
+        yield()
+
+        assertTrue(transport.acceptNewConnections)
     }
 
     // ---------------------------------------------------------------------------

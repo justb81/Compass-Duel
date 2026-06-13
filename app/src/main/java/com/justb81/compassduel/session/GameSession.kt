@@ -213,6 +213,7 @@ class GameSession @Inject constructor(
         matchScore = MatchScore()
         matchInProgress = true
         startRoundInternal(currentLobby.mode, players)
+        transport.acceptNewConnections = false
     }
 
     /**
@@ -222,6 +223,7 @@ class GameSession @Inject constructor(
     fun requestRematch() {
         transport.broadcast(NetMessage.Rematch)
         val currentLobby = _lobby.value ?: return
+        transport.acceptNewConnections = true
         matchInProgress = false
         roundIndex = 0
         matchScore = MatchScore()
@@ -327,7 +329,7 @@ class GameSession @Inject constructor(
      */
     fun submitLocalInput(input: NetMessage.PlayerInput) {
         when (_role.value) {
-            SessionRole.HOST -> feedInputToEngine(input)
+            SessionRole.HOST -> feedInputToEngine(input, HOST_PLAYER_ID)
             SessionRole.CLIENT -> transport.send(hostEndpointId ?: return, input)
             null -> Unit
         }
@@ -399,20 +401,38 @@ class GameSession @Inject constructor(
     private fun handleIncomingMessage(endpointId: String, message: NetMessage) {
         when (_role.value) {
             SessionRole.HOST -> handleHostIncoming(endpointId, message)
-            SessionRole.CLIENT -> handleClientIncoming(message)
+            SessionRole.CLIENT -> handleClientIncoming(endpointId, message)
             null -> Unit
         }
     }
 
     private fun handleHostIncoming(endpointId: String, message: NetMessage) {
         when (message) {
+            // Messages only valid in the host→client direction — reject from clients.
+            is NetMessage.LobbyState,
+            is NetMessage.RoundStart,
+            is NetMessage.StateBroadcast,
+            is NetMessage.RoundEnd,
+            is NetMessage.Rematch,
+            -> return
             is NetMessage.ClientHello -> {
-                val newId = lobbyPlayers.size + 1
+                // Cap lobby size: reject late joiners.
+                if (lobbyPlayers.size >= MAX_PLAYERS) return
+                // Truncate name to prevent unbounded data reaching game logic.
+                val name = message.playerName.take(MAX_PLAYER_NAME_LENGTH)
+                // Allocate lowest unused id (ids start at HOST_PLAYER_ID + 1 = 2).
+                val newId = (HOST_PLAYER_ID + 1..MAX_PLAYERS + 1).first { candidate ->
+                    lobbyPlayers.none { it.id == candidate }
+                }
                 endpointToPlayerId[endpointId] = newId
-                lobbyPlayers.add(LobbyPlayer(id = newId, name = message.playerName))
+                lobbyPlayers.add(LobbyPlayer(id = newId, name = name))
                 broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
             }
             is NetMessage.SeatChosen -> {
+                // Reject out-of-range cell indices.
+                if (message.cell !in 0..8) return
+                // Reject already-taken seats.
+                if (lobbyPlayers.any { it.seatCell == message.cell }) return
                 val playerId = endpointToPlayerId[endpointId] ?: return
                 updatePlayer(playerId) { it.copy(seatCell = message.cell) }
                 broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
@@ -428,12 +448,20 @@ class GameSession @Inject constructor(
                 }
                 broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
             }
-            is NetMessage.PlayerInput -> feedInputToEngine(message)
-            else -> Unit
+            is NetMessage.PlayerInput -> {
+                // Reject inputs from endpoints not registered in the lobby.
+                val trustedId = endpointToPlayerId[endpointId] ?: return
+                // Reject non-finite sensor values before they reach game logic.
+                if (!message.aimDegrees.isFinite()) return
+                if (!message.pitchDegrees.isFinite()) return
+                feedInputToEngine(message, trustedId)
+            }
         }
     }
 
-    private fun handleClientIncoming(message: NetMessage) {
+    private fun handleClientIncoming(endpointId: String, message: NetMessage) {
+        // Only accept messages from the known host endpoint.
+        if (endpointId != hostEndpointId) return
         when (message) {
             is NetMessage.LobbyState -> _lobby.value = message
             is NetMessage.RoundStart -> {
@@ -566,14 +594,14 @@ class GameSession @Inject constructor(
         return NetMessage.RoundEnd(kidsAwards = kidsOutcome.awards, kidsStats = statsList)
     }
 
-    private fun feedInputToEngine(input: NetMessage.PlayerInput) {
+    private fun feedInputToEngine(input: NetMessage.PlayerInput, trustedPlayerId: Int) {
         val isShielding = input.action == PlayerAction.SHIELD
         val action = when (input.action) {
             PlayerAction.ATTACK, PlayerAction.DODGE -> input.action
             else -> null
         }
         engine?.submitInput(
-            playerId = input.playerId,
+            playerId = trustedPlayerId,
             aimDegrees = input.aimDegrees,
             isShielding = isShielding,
             action = action,
@@ -630,6 +658,7 @@ class GameSession @Inject constructor(
         roundIndex = 0
         matchScore = MatchScore()
         matchInProgress = false
+        transport.acceptNewConnections = true
     }
 
     companion object {
@@ -637,6 +666,7 @@ class GameSession @Inject constructor(
         private const val MIN_PLAYERS = 2
         private const val MAX_PLAYERS = 4
         private const val GRID_COLUMNS = 3
+        private const val MAX_PLAYER_NAME_LENGTH = 24
 
         /** Facing-capture window at round start (seconds). */
         private const val FACING_CAPTURE_SECONDS = 3

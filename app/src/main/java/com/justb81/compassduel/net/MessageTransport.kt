@@ -54,6 +54,12 @@ interface MessageTransport {
     /** Emits when a transport operation fails (e.g. Play Services throws). */
     val transportErrors: SharedFlow<TransportError>
 
+    /**
+     * Controls whether new inbound connections should be accepted.
+     * Set to false by the host once a match is in progress or the lobby is full.
+     */
+    var acceptNewConnections: Boolean
+
     /** Start advertising so clients can discover this device. */
     fun startAdvertising(localName: String)
 

@@ -62,6 +62,8 @@ class NearbyConnectionManager @Inject constructor(
     private val _transportErrors = MutableSharedFlow<TransportError>(extraBufferCapacity = BUFFER_CAPACITY)
     override val transportErrors: SharedFlow<TransportError> = _transportErrors.asSharedFlow()
 
+    override var acceptNewConnections: Boolean = true
+
     /** Stores peer names captured in onConnectionInitiated so they can be emitted in onConnectionResult. */
     private val pendingPeerNames: MutableMap<String, String> = mutableMapOf()
 
@@ -71,6 +73,10 @@ class NearbyConnectionManager @Inject constructor(
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            if (!acceptNewConnections) {
+                connectionsClient.rejectConnection(endpointId)
+                return
+            }
             // Store the peer name so it can be included in the Connected event
             pendingPeerNames[endpointId] = info.endpointName
             // Auto-accept — trusted local group in v1.
