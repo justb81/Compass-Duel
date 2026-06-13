@@ -177,6 +177,9 @@ class GameSessionTest {
             // backgroundScope: the session's long-lived collectors are cancelled with the
             // test instead of tripping runTest's UncompletedCoroutinesError leak check.
             scope = testScope.backgroundScope,
+            // Use the test dispatcher as the game-loop dispatcher so engine ticks and
+            // session-state mutations are controlled by the test scheduler (#61).
+            gameLoopDispatcher = testDispatcher,
         )
     }
 

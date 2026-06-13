@@ -64,8 +64,15 @@ class NearbyConnectionManager @Inject constructor(
 
     override var acceptNewConnections: Boolean = true
 
-    /** Stores peer names captured in onConnectionInitiated so they can be emitted in onConnectionResult. */
-    private val pendingPeerNames: MutableMap<String, String> = mutableMapOf()
+    /**
+     * Stores peer names captured in onConnectionInitiated so they can be emitted in
+     * onConnectionResult.
+     *
+     * Accessed from Play Services callback threads (onConnectionInitiated, onConnectionResult,
+     * onDisconnected, stopAll), which may run concurrently. ConcurrentHashMap makes each
+     * individual put/remove/get atomic without requiring explicit locking (#61).
+     */
+    private val pendingPeerNames: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
 
     // ---------------------------------------------------------------------------
     // Callbacks

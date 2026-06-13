@@ -1,6 +1,7 @@
 package com.justb81.compassduel.session
 
 import com.justb81.compassduel.di.ApplicationScope
+import com.justb81.compassduel.di.GameLoopDispatcher
 import com.justb81.compassduel.game.Position
 import com.justb81.compassduel.game.engine.EnginePlayerSetup
 import com.justb81.compassduel.game.engine.GameClock
@@ -20,6 +21,7 @@ import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.net.protocol.NetMessage
 import com.justb81.compassduel.net.protocol.PlayerAction
 import com.justb81.compassduel.net.protocol.RoundPhase
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -30,6 +32,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -92,6 +95,7 @@ class GameSession @Inject constructor(
     private val clock: GameClock,
     private val engineFactory: GameEngineFactory,
     @ApplicationScope private val scope: CoroutineScope,
+    @GameLoopDispatcher private val gameLoopDispatcher: CoroutineDispatcher,
 ) {
 
     // ---------------------------------------------------------------------------
@@ -148,8 +152,18 @@ class GameSession @Inject constructor(
     private var localPlayerName: String = ""
     private var hostEndpointId: String? = null
     private var clientPlayerName: String = ""
+
+    // lobbyPlayers is guarded by lobbyLock: it is mutated both from the transport-collector
+    // coroutines (Dispatchers.Default pool) and from main-thread API calls (hostLobby,
+    // chooseSeat, chooseCharacter, startMatch). All read-modify-write sequences on
+    // lobbyPlayers must be performed inside synchronized(lobbyLock) (#61).
+    //
+    // endpointToPlayerId is a ConcurrentHashMap so its individual operations (put/remove/get)
+    // are atomic. Compound sequences that read AND mutate it (e.g. allocating a new id) are
+    // also protected by lobbyLock so they remain consistent with lobbyPlayers mutations (#61).
+    private val lobbyLock = Any()
     private var lobbyPlayers: MutableList<LobbyPlayer> = mutableListOf()
-    private val endpointToPlayerId: MutableMap<String, Int> = mutableMapOf()
+    private val endpointToPlayerId: MutableMap<String, Int> = ConcurrentHashMap()
     private var engine: GameEngine? = null
     private var snapshotJob: Job? = null
     private var messageJob: Job? = null
@@ -186,7 +200,9 @@ class GameSession @Inject constructor(
         reset()
         _role.value = SessionRole.HOST
         localPlayerName = playerName
-        lobbyPlayers = mutableListOf(LobbyPlayer(id = HOST_PLAYER_ID, name = playerName))
+        synchronized(lobbyLock) {
+            lobbyPlayers = mutableListOf(LobbyPlayer(id = HOST_PLAYER_ID, name = playerName))
+        }
         broadcastLobbyToAll(mode)
         startConnectionListener()
         startMessageListener()
@@ -212,7 +228,7 @@ class GameSession @Inject constructor(
      */
     fun startMatch() {
         val currentLobby = _lobby.value ?: return
-        val players = lobbyPlayers.toList()
+        val players = synchronized(lobbyLock) { lobbyPlayers.toList() }
 
         check(players.size in MIN_PLAYERS..MAX_PLAYERS) {
             "Need $MIN_PLAYERS–$MAX_PLAYERS players; have ${players.size}"
@@ -410,7 +426,9 @@ class GameSession @Inject constructor(
                     engine?.stop()
                     _sessionEvents.tryEmit(SessionEvent.PeerLost)
                 } else {
-                    lobbyPlayers.removeAll { it.id == playerId }
+                    synchronized(lobbyLock) {
+                        lobbyPlayers.removeAll { it.id == playerId }
+                    }
                     broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
                 }
             }
@@ -442,35 +460,47 @@ class GameSession @Inject constructor(
             is NetMessage.Rematch,
             -> return
             is NetMessage.ClientHello -> {
-                // Cap lobby size: reject late joiners.
-                if (lobbyPlayers.size >= MAX_PLAYERS) return
                 // Truncate name to prevent unbounded data reaching game logic.
                 val name = message.playerName.take(MAX_PLAYER_NAME_LENGTH)
-                // Allocate lowest unused id (ids start at HOST_PLAYER_ID + 1 = 2).
-                val newId = (HOST_PLAYER_ID + 1..MAX_PLAYERS + 1).first { candidate ->
-                    lobbyPlayers.none { it.id == candidate }
+                // The compound size-check → id-allocation → add must be atomic under lobbyLock
+                // so concurrent ClientHello messages cannot both pass the size guard (#61).
+                val added = synchronized(lobbyLock) {
+                    // Cap lobby size: reject late joiners.
+                    if (lobbyPlayers.size >= MAX_PLAYERS) return@synchronized false
+                    // Allocate lowest unused id (ids start at HOST_PLAYER_ID + 1 = 2).
+                    val newId = (HOST_PLAYER_ID + 1..MAX_PLAYERS + 1).first { candidate ->
+                        lobbyPlayers.none { it.id == candidate }
+                    }
+                    endpointToPlayerId[endpointId] = newId
+                    lobbyPlayers.add(LobbyPlayer(id = newId, name = name))
+                    true
                 }
-                endpointToPlayerId[endpointId] = newId
-                lobbyPlayers.add(LobbyPlayer(id = newId, name = name))
-                broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+                if (added) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
             }
             is NetMessage.SeatChosen -> {
                 // Reject out-of-range cell indices.
                 if (message.cell !in 0..8) return
-                // Reject already-taken seats.
-                if (lobbyPlayers.any { it.seatCell == message.cell }) return
                 val playerId = endpointToPlayerId[endpointId] ?: return
-                updatePlayer(playerId) { it.copy(seatCell = message.cell) }
-                broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+                // The duplicate-seat check and the update must be atomic under lobbyLock
+                // so two clients cannot concurrently claim the same seat (#61).
+                val updated = synchronized(lobbyLock) {
+                    // Reject already-taken seats.
+                    if (lobbyPlayers.any { it.seatCell == message.cell }) return@synchronized false
+                    updatePlayerLocked(playerId) { it.copy(seatCell = message.cell) }
+                    true
+                }
+                if (updated) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
             }
             is NetMessage.CharacterChosen -> {
                 val playerId = endpointToPlayerId[endpointId] ?: return
-                updatePlayer(playerId) { p ->
-                    p.copy(
-                        element = message.element,
-                        spriteId = message.spriteId,
-                        ready = message.element != null || message.spriteId != null,
-                    )
+                synchronized(lobbyLock) {
+                    updatePlayerLocked(playerId) { p ->
+                        p.copy(
+                            element = message.element,
+                            spriteId = message.spriteId,
+                            ready = message.element != null || message.spriteId != null,
+                        )
+                    }
                 }
                 broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
             }
@@ -551,7 +581,12 @@ class GameSession @Inject constructor(
             )
         }
 
-        val activeEngine = engineFactory.create(rules, clock, scope)
+        // Create the engine with a scope that is confined to the single-threaded
+        // gameLoopDispatcher so all tick-loop state mutations run on one thread (#61).
+        // The scope inherits the SupervisorJob from the application scope so that a tick
+        // failure does not cancel unrelated coroutines.
+        val engineScope = CoroutineScope(scope.coroutineContext + gameLoopDispatcher)
+        val activeEngine = engineFactory.create(rules, clock, engineScope)
         engine = activeEngine
         activeEngine.startRound(engineSetup, roundIndex)
 
@@ -600,7 +635,8 @@ class GameSession @Inject constructor(
                         // display the same "stale roundEnd" window (#68).
                         _roundEnd.value = null
                         val currentLobby = _lobby.value ?: return@launch
-                        startRoundInternal(currentLobby.mode, lobbyPlayers.toList())
+                        val currentPlayers = synchronized(lobbyLock) { lobbyPlayers.toList() }
+                        startRoundInternal(currentLobby.mode, currentPlayers)
                     }
                 }
                 GameMode.KIDS -> _sessionEvents.tryEmit(SessionEvent.MatchOver)
@@ -658,7 +694,7 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun broadcastLobbyToAll(mode: GameMode) {
-        val players = lobbyPlayers.toList()
+        val players = synchronized(lobbyLock) { lobbyPlayers.toList() }
         _lobby.value = NetMessage.LobbyState(mode = mode, players = players, yourPlayerId = HOST_PLAYER_ID)
         endpointToPlayerId.forEach { (endpointId, playerId) ->
             transport.send(
@@ -668,12 +704,25 @@ class GameSession @Inject constructor(
         }
     }
 
+    /**
+     * Mutates the host player's [LobbyPlayer] entry.
+     *
+     * Must be called while holding [lobbyLock] when accessed from a coroutine that may
+     * race with transport-collector coroutines (#61).
+     */
     private fun updateHostPlayer(transform: (LobbyPlayer) -> LobbyPlayer) {
-        val idx = lobbyPlayers.indexOfFirst { it.id == HOST_PLAYER_ID }
-        if (idx >= 0) lobbyPlayers[idx] = transform(lobbyPlayers[idx])
+        synchronized(lobbyLock) {
+            val idx = lobbyPlayers.indexOfFirst { it.id == HOST_PLAYER_ID }
+            if (idx >= 0) lobbyPlayers[idx] = transform(lobbyPlayers[idx])
+        }
     }
 
-    private fun updatePlayer(playerId: Int, transform: (LobbyPlayer) -> LobbyPlayer) {
+    /**
+     * Mutates a [LobbyPlayer] by [playerId] **without** acquiring [lobbyLock].
+     *
+     * Callers are responsible for holding [lobbyLock] before calling this function.
+     */
+    private fun updatePlayerLocked(playerId: Int, transform: (LobbyPlayer) -> LobbyPlayer) {
         val idx = lobbyPlayers.indexOfFirst { it.id == playerId }
         if (idx >= 0) lobbyPlayers[idx] = transform(lobbyPlayers[idx])
     }
@@ -702,7 +751,9 @@ class GameSession @Inject constructor(
         _lobby.value = null
         _snapshot.value = null
         _roundEnd.value = null
-        lobbyPlayers.clear()
+        synchronized(lobbyLock) {
+            lobbyPlayers.clear()
+        }
         endpointToPlayerId.clear()
         localPlayerName = ""
         clientPlayerName = ""

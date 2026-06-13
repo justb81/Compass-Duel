@@ -287,14 +287,18 @@ open class GameEngine(
     val roundOverSignal: CompletableDeferred<Unit>
         get() = _roundOverSignal
 
-    private var engineState: EngineState? = null
+    // These fields are written by the tick loop and read by roundOutcome() which may be called
+    // from a different coroutine (the session round-end path). @Volatile provides the required
+    // happens-before guarantee for single-write/single-read cross-thread visibility (#61).
+    @Volatile private var engineState: EngineState? = null
+    @Volatile private var currentPhase: RoundPhase = RoundPhase.COUNTDOWN
+
     private var setup: List<EnginePlayerSetup> = emptyList()
     private var roundIndex: Int = 0
     private var roundStartMillis: Long = 0L
     private var activePhaseStartMillis: Long = 0L
     private var sequenceNumber: Int = 0
     private var tickJob: Job? = null
-    private var currentPhase: RoundPhase = RoundPhase.COUNTDOWN
 
     // Input queue — written from any thread, drained on the tick coroutine
     private val inputLock = Any()
