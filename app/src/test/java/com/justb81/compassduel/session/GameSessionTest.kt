@@ -122,7 +122,7 @@ private class FakeTransport : MessageTransport {
  * Minimal [GameEngine] stand-in that never ticks, used to verify session wiring
  * without running real game logic in these unit tests.
  */
-private class NoOpEngine(rules: ModeRuleSet, clock: GameClock, scope: CoroutineScope) :
+private open class NoOpEngine(rules: ModeRuleSet, clock: GameClock, scope: CoroutineScope) :
     GameEngine(rules, clock, scope)
 
 /**

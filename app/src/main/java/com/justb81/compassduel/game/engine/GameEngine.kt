@@ -350,7 +350,7 @@ open class GameEngine(
      * @param isShielding True when the device is in shield posture.
      * @param action Optional discrete action; null means posture-only update.
      */
-    fun submitInput(
+    open fun submitInput(
         playerId: Int,
         aimDegrees: Float,
         isShielding: Boolean,
