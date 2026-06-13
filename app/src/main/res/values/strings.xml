@@ -15,6 +15,12 @@
     <string name="home_host_game">Host game</string>
     <string name="home_join_game">Join game</string>
 
+    <!-- Crash report dialog (shown on next launch after an uncaught exception) -->
+    <string name="crash_dialog_title">The app closed unexpectedly</string>
+    <string name="crash_dialog_message">Sorry about that. The details below show what went wrong last time. Tap Copy and send them to the developer to help fix it.</string>
+    <string name="crash_dialog_copy">Copy details</string>
+    <string name="crash_dialog_dismiss">Dismiss</string>
+
     <!-- Peer-lost dialog -->
     <string name="peer_lost_title">Connection lost</string>
     <string name="peer_lost_message">The connection to the other device was lost. You have been returned to the home screen.</string>
