@@ -146,6 +146,9 @@ jobs:
               printf '## Warning: SARIF upload failures\n\n'
               printf 'The following uploads failed after 2 attempts:\n\n'
               for cat in "${failed_categories[@]}"; do
+                # The backticks are literal Markdown formatting, not a command
+                # substitution, so single quotes are intentional here.
+                # shellcheck disable=SC2016
                 printf -- '- `%s`\n' "$cat"
               done
               printf '\nCode-scanning annotations may be incomplete.\n'

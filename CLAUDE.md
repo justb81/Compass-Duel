@@ -188,6 +188,12 @@ check them before pushing to save a red-CI round-trip:
   `endpointId != hostEndpointId` (and the host rejects host→client message
   types). Client-incoming tests must call `connectTo("host-ep")` to register the
   host endpoint before emitting host messages, or they are correctly dropped.
+- **`actionlint` runs `shellcheck` only when it's installed.** The
+  `workflow-lint.yml` CI job runs on a runner that has `shellcheck`, so it lints
+  every `run:` script (e.g. SC2012/SC2016) — but a local `actionlint` without
+  `shellcheck` silently skips those checks and passes. Install `shellcheck`
+  before relying on a local actionlint run, and suppress intentional findings
+  with a justified `# shellcheck disable=SCxxxx` directive on the offending line.
 
 ### Git Workflow
 

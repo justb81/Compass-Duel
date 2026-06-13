@@ -189,6 +189,9 @@ jobs:
         run: |
           mkdir -p play-artifacts
           AAB="app/build/outputs/bundle/release/app-release.aab"
+          # Globbing a single, known build-output directory whose filenames are
+          # AGP-generated (no spaces/newlines), so ls is safe here.
+          # shellcheck disable=SC2012
           [ -f "$AAB" ] || AAB=$(ls app/build/outputs/bundle/release/*.aab 2>/dev/null | head -n1 || true)
           if [ -n "$AAB" ] && [ -f "$AAB" ]; then
             cp "$AAB" "play-artifacts/app.aab"
