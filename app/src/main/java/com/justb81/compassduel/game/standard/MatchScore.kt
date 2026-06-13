@@ -24,7 +24,17 @@ data class MatchScore(val roundWins: Map<Int, Int> = emptyMap()) {
     /**
      * Returns the id of the player who has reached [StandardRules.ROUNDS_TO_WIN]
      * round wins, or null when the match is still ongoing.
+     *
+     * When multiple players simultaneously reach the threshold the player with the
+     * highest win count wins; ties on win count are broken by the lowest player id,
+     * making the result fully deterministic regardless of map iteration order.
      */
-    fun matchWinnerId(): Int? =
-        roundWins.entries.firstOrNull { (_, wins) -> wins >= StandardRules.ROUNDS_TO_WIN }?.key
+    fun matchWinnerId(): Int? {
+        val candidates = roundWins.entries.filter { (_, wins) -> wins >= StandardRules.ROUNDS_TO_WIN }
+        if (candidates.isEmpty()) return null
+        val maxWins = candidates.maxOf { it.value }
+        return candidates
+            .filter { it.value == maxWins }
+            .minOf { it.key }
+    }
 }

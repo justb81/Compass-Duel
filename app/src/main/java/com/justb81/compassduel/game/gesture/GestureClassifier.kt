@@ -30,8 +30,9 @@ enum class GestureEvent {
     ATTACK,
 
     /**
-     * Phone pitch swung ≥25° toward the opposite sign within 300 ms without a shake.
-     * Never emitted when dodge is disabled (Kids Mode).
+     * Phone pitch swung ≥25° in the direction opposite to the baseline pitch within
+     * 300 ms without a shake spike. Does not require the pitch to cross zero (e.g.
+     * +30° → +2° is a valid 28° reversal). Never emitted when dodge is disabled (Kids Mode).
      */
     DODGE,
 }
@@ -76,8 +77,11 @@ object GestureThresholds {
  * 3. subject to a [GestureThresholds.SHAKE_DEBOUNCE_MILLIS] debounce window.
  *
  * **DODGE** fires when the pitch swings at least [GestureThresholds.DODGE_TILT_DELTA_DEGREES]
- * toward the opposite sign within [GestureThresholds.DODGE_WINDOW_MILLIS] ms, without
- * a simultaneous shake spike. Never fires when [dodgeEnabled] is false.
+ * in the direction opposite to the previous sample's pitch within
+ * [GestureThresholds.DODGE_WINDOW_MILLIS] ms, without a simultaneous shake spike.
+ * The reversal is detected by sign: the swing direction must oppose the baseline pitch,
+ * so +30 → +2 (28° back toward zero) qualifies without requiring a strict zero-crossing.
+ * Never fires when [dodgeEnabled] is false.
  *
  * **Shield posture** is a continuous boolean available via [isShieldPosture]: true when
  * |pitch| ≤ [GestureThresholds.SHIELD_PITCH_DEGREES].
@@ -117,13 +121,23 @@ class GestureClassifier(
         }
 
         // --- DODGE detection ---
+        // A DODGE is a large, rapid pitch reversal — the pitch must swing at least
+        // DODGE_TILT_DELTA_DEGREES in the direction opposite to the previous sample's
+        // pitch, within DODGE_WINDOW_MILLIS.  We detect direction reversal by checking
+        // that the swing direction (sign of delta) is opposite to the baseline pitch
+        // direction (sign of prev.pitchDegrees).  This correctly handles near-zero
+        // baselines (+30 → +2 is a reversal relative to +30) without requiring the
+        // pitch to actually cross zero.
         if (dodgeEnabled && !isShakeSpike && prev != null) {
             val withinWindow = (sample.timestampMillis - prev.timestampMillis) <= GestureThresholds.DODGE_WINDOW_MILLIS
-            val swingMagnitude = sample.pitchDegrees - prev.pitchDegrees
-            val isOppositeSign = prev.pitchDegrees * sample.pitchDegrees < 0f
-            val isLargeSwing = kotlin.math.abs(swingMagnitude) >= GestureThresholds.DODGE_TILT_DELTA_DEGREES
+            val swingDelta = sample.pitchDegrees - prev.pitchDegrees
+            val isLargeSwing = kotlin.math.abs(swingDelta) >= GestureThresholds.DODGE_TILT_DELTA_DEGREES
+            // Reversal: the swing moved opposite to the direction of the baseline pitch.
+            // When prev is exactly zero the swing is still a valid reversal if it is large enough.
+            val isReversal = prev.pitchDegrees * swingDelta < 0f ||
+                (prev.pitchDegrees == 0f && isLargeSwing)
 
-            if (withinWindow && isOppositeSign && isLargeSwing) {
+            if (withinWindow && isReversal && isLargeSwing) {
                 return GestureEvent.DODGE
             }
         }

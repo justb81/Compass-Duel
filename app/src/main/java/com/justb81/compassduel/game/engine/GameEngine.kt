@@ -342,10 +342,13 @@ open class GameEngine(
      * Returns the authoritative outcome of the current round, or null when the round
      * has not yet ended.
      *
-     * Only meaningful once [snapshots] has emitted a snapshot with
-     * [com.justb81.compassduel.net.protocol.RoundPhase.ROUND_OVER].
+     * Returns null unless the engine is in [RoundPhase.ROUND_OVER], preventing
+     * callers from receiving a provisional (and potentially wrong) outcome mid-round.
      */
-    open fun roundOutcome(): RoundOutcome? = engineState?.let { rules.roundOutcome(it) }
+    open fun roundOutcome(): RoundOutcome? {
+        if (currentPhase != RoundPhase.ROUND_OVER) return null
+        return engineState?.let { rules.roundOutcome(it) }
+    }
 
     /** Stops the tick loop and cancels the round. */
     fun stop() {
@@ -376,11 +379,12 @@ open class GameEngine(
         }
 
         // --- Phase transitions ---
+        // activePhaseStartMillis is fixed at (roundStartMillis + COUNTDOWN_MILLIS) and is
+        // never overwritten with `now`.  This keeps elapsed/remaining time derived from the
+        // same scheduled boundary in both COUNTDOWN and PLAYING, preventing a visible
+        // timer jump caused by tick-granularity jitter at the phase boundary.
         val newPhase = computePhase(now)
         if (newPhase != currentPhase) {
-            if (newPhase == RoundPhase.PLAYING) {
-                activePhaseStartMillis = now
-            }
             currentPhase = newPhase
         }
 

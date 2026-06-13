@@ -94,8 +94,9 @@ class KidsRuleSet : ModeRuleSet {
     }
 
     /**
-     * Evaluates a single sparkle toss: counts the throw, finds the best on-cone target,
-     * and resolves the catch. Returns the updated players and stats.
+     * Evaluates a single sparkle toss: enforces the host-side toss cooldown, counts the
+     * throw, finds the best on-cone target, and resolves the catch.
+     * Returns the updated players and stats.
      */
     private fun applyToss(
         players: List<KidsPlayer>,
@@ -109,11 +110,19 @@ class KidsRuleSet : ModeRuleSet {
         val actorIndex = players.indexOfFirst { it.id == action.playerId }
         if (actorIndex < 0) return KidsTickState(players, stats)
 
+        // Host-side cooldown guard — mirrors StandardRuleSet.applyOneAttack.
+        val actor = players[actorIndex]
+        if (nowMillis < actor.tossReadyAtMillis) return KidsTickState(players, stats)
+
+        // Mark the cooldown window on the actor before evaluating the toss outcome.
+        val updatedActor = actor.copy(tossReadyAtMillis = nowMillis + KidsRules.TOSS_COOLDOWN_MILLIS)
+        val playersWithCooldown = players.toMutableList().also { it[actorIndex] = updatedActor }
+
         // Every toss counts toward sparkles thrown, regardless of outcome.
         val thrownStats = accumulateStat(stats, action.playerId) { it.copy(sparklesThrown = it.sparklesThrown + 1) }
         val actorSetup = setup.firstOrNull { it.id == action.playerId }
-        val target = actorSetup?.let { selectTarget(action.playerId, action.aimDegrees, players, setup, it) }
-        if (actorSetup == null || target == null) return KidsTickState(players, thrownStats)
+        val target = actorSetup?.let { selectTarget(action.playerId, action.aimDegrees, playersWithCooldown, setup, it) }
+        if (actorSetup == null || target == null) return KidsTickState(playersWithCooldown, thrownStats)
 
         val bearing = Bearing.calculate(actorSetup.position, setup.first { it.id == target.id }.position)
         val result = evaluateCatch(
@@ -123,7 +132,7 @@ class KidsRuleSet : ModeRuleSet {
             targetIsStarLeader = leaderId == target.id,
             nowMillis = nowMillis,
         )
-        return resolveCatch(result, players, thrownStats, action.playerId, actorIndex, target, nowMillis, events)
+        return resolveCatch(result, playersWithCooldown, thrownStats, action.playerId, actorIndex, target, nowMillis, events)
     }
 
     @Suppress("LongParameterList")
