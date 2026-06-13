@@ -1,5 +1,9 @@
 package com.justb81.compassduel.ui.screens.home
 
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.Preferences
+import com.justb81.compassduel.data.preferences.UserPreferencesRepository
 import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.net.ConnectionEvent
 import com.justb81.compassduel.net.DiscoveredEndpoint
@@ -8,25 +12,35 @@ import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.NetMessage
 import com.justb81.compassduel.session.GameEngineFactory
 import com.justb81.compassduel.session.GameSession
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.yield
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.io.File
 
 /**
- * Tests for [HomeViewModel] — covers the non-blank name guard (#76) and the browse-phase
- * delegation. Drives a real [GameSession] over an in-memory [FakeTransport] so the guard's
- * effect on the transport (advertise / request-connection) is observable.
+ * Tests for [HomeViewModel] — covers the non-blank name guard (#76), the browse-phase delegation,
+ * and player-name prefill/persistence. Drives a real [GameSession] over an in-memory
+ * [FakeTransport] so the guard's effect on the transport (advertise / request-connection) is
+ * observable, and a real DataStore-backed [UserPreferencesRepository] over a temp file.
  */
 class HomeViewModelTest {
 
@@ -34,7 +48,28 @@ class HomeViewModelTest {
     private val testScope = TestScope(testDispatcher)
     private val transport = FakeTransport()
 
-    private fun buildViewModel(): HomeViewModel {
+    @TempDir
+    lateinit var tempDir: File
+
+    @BeforeEach
+    fun setUp() {
+        // HomeViewModel.init launches in viewModelScope (Dispatchers.Main) to restore the name.
+        Dispatchers.setMain(testDispatcher)
+    }
+
+    @AfterEach
+    fun tearDown() {
+        Dispatchers.resetMain()
+    }
+
+    private fun buildDataStore(): DataStore<Preferences> =
+        PreferenceDataStoreFactory.create(scope = testScope.backgroundScope) {
+            File(tempDir, "user.preferences_pb")
+        }
+
+    private fun buildViewModel(
+        prefs: UserPreferencesRepository = UserPreferencesRepository(buildDataStore()),
+    ): HomeViewModel {
         val session = GameSession(
             transport = transport,
             clock = object : GameClock {
@@ -46,7 +81,7 @@ class HomeViewModelTest {
             scope = testScope.backgroundScope,
             gameLoopDispatcher = testDispatcher,
         )
-        return HomeViewModel(session)
+        return HomeViewModel(session, prefs)
     }
 
     @Test
@@ -106,6 +141,41 @@ class HomeViewModelTest {
         viewModel.stopBrowsing()
         yield()
         assertTrue(transport.discoveryStopped)
+    }
+
+    @Test
+    fun `init prefills the saved player name`() = testScope.runTest {
+        val prefs = UserPreferencesRepository(buildDataStore())
+        prefs.setPlayerName("Saved")
+
+        val viewModel = buildViewModel(prefs)
+        advanceUntilIdle()
+
+        assertEquals("Saved", viewModel.uiState.value.playerName)
+    }
+
+    @Test
+    fun `init does not clobber a name typed before the saved name loads`() = testScope.runTest {
+        val prefs = UserPreferencesRepository(buildDataStore())
+        prefs.setPlayerName("Saved")
+
+        val viewModel = buildViewModel(prefs)
+        viewModel.onPlayerNameChanged("Typed")
+        advanceUntilIdle()
+
+        assertEquals("Typed", viewModel.uiState.value.playerName)
+    }
+
+    @Test
+    fun `hostGame persists the trimmed player name`() = testScope.runTest {
+        val prefs = UserPreferencesRepository(buildDataStore())
+        val viewModel = buildViewModel(prefs)
+        viewModel.onPlayerNameChanged("  Bob  ")
+
+        assertTrue(viewModel.hostGame())
+        advanceUntilIdle()
+
+        assertEquals("Bob", prefs.playerName.first())
     }
 
     /**

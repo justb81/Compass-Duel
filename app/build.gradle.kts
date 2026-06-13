@@ -64,6 +64,9 @@ dependencies {
     implementation(libs.navigation.compose)
     implementation(libs.hilt.navigation.compose)
 
+    // Persistence (theme preference + last-used player name)
+    implementation(libs.androidx.datastore.preferences)
+
     // Offline P2P transport (BLE + Wi-Fi)
     implementation(libs.play.services.nearby)
 
