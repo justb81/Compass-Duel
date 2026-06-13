@@ -21,10 +21,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.test.advanceTimeBy
-import kotlinx.coroutines.test.advanceUntilIdle
-import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
@@ -157,7 +156,7 @@ class GameSessionTest {
         val session = buildSession()
 
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
         assertEquals(SessionRole.HOST, session.role.value)
         assertTrue(transport.advertisingStarted)
@@ -168,7 +167,7 @@ class GameSessionTest {
         val session = buildSession()
 
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
         val lobby = session.lobby.value
         assertNotNull(lobby)
@@ -181,10 +180,10 @@ class GameSessionTest {
     fun `setMode rebroadcasts lobby with new mode`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
         session.setMode(GameMode.KIDS)
-        advanceUntilIdle()
+        yield()
 
         assertEquals(GameMode.KIDS, session.lobby.value?.mode)
     }
@@ -198,7 +197,7 @@ class GameSessionTest {
         val session = buildSession()
 
         session.joinLobby(playerName = "Bob")
-        advanceUntilIdle()
+        yield()
 
         assertEquals(SessionRole.CLIENT, session.role.value)
         assertTrue(transport.discoveryStarted)
@@ -208,17 +207,14 @@ class GameSessionTest {
     fun `connectTo sends ClientHello after connected event`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
-        advanceUntilIdle()
+        yield()
 
         session.connectTo(endpointId = "host-ep")
-        advanceUntilIdle()
+        yield()
 
         // Simulate the connected event from transport.
-        // runCurrent() drives the backgroundScope connection-listener coroutine
-        // that is already subscribed and waiting; advanceUntilIdle() would also work
-        // for pure-lobby tests but is avoided here to keep the intent explicit.
         transport.emitConnection(ConnectionEvent.Connected("host-ep", "host-ep"))
-        runCurrent()
+        yield()
 
         val helloMessages = transport.sentMessages.filterIsInstance<NetMessage.ClientHello>()
         assertEquals(1, helloMessages.size)
@@ -233,13 +229,10 @@ class GameSessionTest {
     fun `host receives ClientHello and adds player to lobby`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
-        // runCurrent() flushes the backgroundScope message-listener coroutine that was
-        // rescheduled by SharedFlow.emit() without advancing virtual time (safe even if
-        // an engine tick loop were running, though none is active here).
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        runCurrent()
+        yield()
 
         val lobby = session.lobby.value
         assertEquals(2, lobby?.players?.size)
@@ -250,13 +243,13 @@ class GameSessionTest {
     fun `host receives SeatChosen and updates lobby`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        runCurrent()
+        yield()
 
         transport.emitIncoming("client-ep", NetMessage.SeatChosen(cell = 3))
-        runCurrent()
+        yield()
 
         val bob = session.lobby.value?.players?.find { it.name == "Bob" }
         assertEquals(3, bob?.seatCell)
@@ -266,13 +259,13 @@ class GameSessionTest {
     fun `host receives CharacterChosen and marks player ready`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        runCurrent()
+        yield()
 
         transport.emitIncoming("client-ep", NetMessage.CharacterChosen(element = Element.FIRE))
-        runCurrent()
+        yield()
 
         val bob = session.lobby.value?.players?.find { it.name == "Bob" }
         assertTrue(bob?.ready == true)
@@ -287,7 +280,7 @@ class GameSessionTest {
     fun `client receives LobbyState and updates lobby flow`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
-        advanceUntilIdle()
+        yield()
 
         val lobbyState = NetMessage.LobbyState(
             mode = GameMode.KIDS,
@@ -295,7 +288,7 @@ class GameSessionTest {
             yourPlayerId = 2,
         )
         transport.emitIncoming("host-ep", lobbyState)
-        runCurrent()
+        yield()
 
         assertEquals(GameMode.KIDS, session.lobby.value?.mode)
     }
@@ -304,12 +297,8 @@ class GameSessionTest {
     fun `client receives RoundStart and emits RoundStarted event`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
-        advanceUntilIdle()
+        yield()
 
-        // Turbine subscribes to the SharedFlow before the emission so tryEmit()
-        // finds an active subscriber. awaitItem() suspends and the StandardTestDispatcher
-        // schedules the message-listener and event-delivery coroutines within the
-        // same runCurrent() pass that Turbine drives internally.
         session.sessionEvents.test {
             transport.emitIncoming(
                 "host-ep",
@@ -321,7 +310,7 @@ class GameSessionTest {
                     facingCaptureSeconds = 3,
                 ),
             )
-            runCurrent()
+            yield()
             assertEquals(SessionEvent.RoundStarted, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -331,11 +320,11 @@ class GameSessionTest {
     fun `client receives Rematch and emits RematchRequested event`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
-        advanceUntilIdle()
+        yield()
 
         session.sessionEvents.test {
             transport.emitIncoming("host-ep", NetMessage.Rematch)
-            runCurrent()
+            yield()
             assertEquals(SessionEvent.RematchRequested, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -350,10 +339,10 @@ class GameSessionTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
         val countBefore = transport.sentMessages.size
-        advanceUntilIdle()
+        yield()
 
         session.chooseSeat(cell = 2)
-        advanceUntilIdle()
+        yield()
 
         val alice = session.lobby.value?.players?.find { it.name == "Alice" }
         assertEquals(2, alice?.seatCell)
@@ -365,12 +354,12 @@ class GameSessionTest {
     fun `client chooseSeat sends SeatChosen to host endpoint`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
-        advanceUntilIdle()
+        yield()
         session.connectTo("host-ep")
-        advanceUntilIdle()
+        yield()
 
         session.chooseSeat(cell = 5)
-        advanceUntilIdle()
+        yield()
 
         val sent = transport.sentMessages.filterIsInstance<NetMessage.SeatChosen>()
         assertTrue(sent.isNotEmpty()) { "Expected SeatChosen to be sent" }
@@ -385,10 +374,10 @@ class GameSessionTest {
     fun `leave resets all state and stops transport`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
         session.leave()
-        advanceUntilIdle()
+        yield()
 
         assertNull(session.role.value)
         assertNull(session.lobby.value)
@@ -403,13 +392,13 @@ class GameSessionTest {
     fun `host receives peer disconnection in lobby removes player`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
-        advanceUntilIdle()
+        yield()
 
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        runCurrent()
+        yield()
 
         transport.emitConnection(ConnectionEvent.Disconnected("client-ep"))
-        runCurrent()
+        yield()
 
         val lobby = session.lobby.value
         assertEquals(1, lobby?.players?.size)
@@ -420,13 +409,13 @@ class GameSessionTest {
     fun `client receives host disconnection emits PeerLost`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
-        advanceUntilIdle()
+        yield()
         session.connectTo("host-ep")
-        advanceUntilIdle()
+        yield()
 
         session.sessionEvents.test {
             transport.emitConnection(ConnectionEvent.Disconnected("host-ep"))
-            runCurrent()
+            yield()
             assertEquals(SessionEvent.PeerLost, awaitItem())
             cancelAndIgnoreRemainingEvents()
         }
@@ -455,50 +444,39 @@ class GameSessionTest {
             )
 
             session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
-            advanceUntilIdle()
+            yield()
 
-            // Use runCurrent() after each emit so the backgroundScope message-listener
-            // processes the message without triggering the engine tick-loop to run
-            // indefinitely (which advanceUntilIdle() would do once the engine starts).
             transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
-            runCurrent()
+            yield()
 
             session.chooseSeat(cell = 0)
             transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
-            runCurrent()
+            yield()
 
             session.chooseCharacter(spriteId = 0)
             transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
-            runCurrent()
+            yield()
 
             session.startMatch()
-            // runCurrent() starts the engine tick loop and snapshotJob without
-            // advancing virtual time past any delay() boundary.
-            runCurrent()
+            yield()
 
-            // Advance fake clock past countdown (3 s) then past round duration (60 s),
-            // and step the coroutine scheduler by the same amount so the tick loop
-            // fires correctly.  advanceUntilIdle() is intentionally avoided here: the
-            // engine tick loop (while(isActive) { tick(); delay(100) }) runs on the
-            // backgroundScope scheduler and would spin forever if we called
-            // advanceUntilIdle().  advanceTimeBy() + runCurrent() advance exactly as
-            // far as needed and no further.
+            // Advance the fake clock and virtual time in lockstep. Suspending the test
+            // body via delay() is what lets backgroundScope work (collectors, the
+            // engine tick loop) run: the test scheduler only interleaves background
+            // coroutines while the foreground test body is suspended.
             val countdownMs = 3_100L
             val roundMs = 60_100L
             clock.advance(countdownMs)
-            advanceTimeBy(countdownMs)
-            runCurrent()
+            delay(countdownMs)
 
             clock.advance(roundMs)
-            advanceTimeBy(roundMs)
-            runCurrent()
+            delay(roundMs)
 
             // Allow the ROUND_END_DELAY_MILLIS (200 ms) delay inside
             // computeAndBroadcastRoundEnd to elapse.
             val roundEndDelayMs = 200L
             clock.advance(roundEndDelayMs)
-            advanceTimeBy(roundEndDelayMs)
-            runCurrent()
+            delay(roundEndDelayMs)
 
             val roundEnd = session.roundEnd.value
             assertNotNull(roundEnd)
@@ -524,7 +502,7 @@ class GameSessionTest {
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
         session.chooseSeat(cell = 0)
         session.chooseCharacter(element = Element.FIRE)
-        advanceUntilIdle()
+        yield()
 
         var threw = false
         try {
