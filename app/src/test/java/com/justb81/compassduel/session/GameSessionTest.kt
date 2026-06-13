@@ -46,6 +46,12 @@ private class SessionTestClock(private val startMillis: Long = 1_000_000L) : Gam
 }
 
 /**
+ * Virtual time to advance past the host/client reconnect grace windows
+ * (`*_RECONNECT_GRACE_MILLIS` = 8 s in [GameSession]) so a grace timer fires in tests.
+ */
+private const val RECONNECT_GRACE_BUFFER_MILLIS = 8_500L
+
+/**
  * In-memory [MessageTransport] that records sent messages and lets tests inject events.
  *
  * All sent messages are stored in [sentMessages] for assertion in tests. Connection
@@ -89,10 +95,13 @@ private class FakeTransport : MessageTransport {
     var allStopped: Boolean = false
     override var acceptNewConnections: Boolean = true
 
+    /** Endpoints passed to [requestConnection], in order, for reconnect assertions. */
+    val connectionRequests: MutableList<String> = mutableListOf()
+
     override fun startAdvertising(localName: String) { advertisingStarted = true }
     override fun startDiscovery() { discoveryStarted = true }
     override fun stopDiscovery() { discoveryStopped = true }
-    override fun requestConnection(endpointId: String, localName: String) = Unit
+    override fun requestConnection(endpointId: String, localName: String) { connectionRequests += endpointId }
 
     override fun send(endpointId: String, message: NetMessage) {
         sentMessages += message
@@ -103,6 +112,12 @@ private class FakeTransport : MessageTransport {
         sentMessages += message
     }
 
+    // The reliable variants record alongside the lossy ones so existing message assertions
+    // hold; reliability itself is covered by ReliableMessageTransportTest.
+    override fun sendReliable(endpointId: String, message: NetMessage) = send(endpointId, message)
+
+    override fun broadcastReliable(message: NetMessage) = broadcast(message)
+
     override fun stopAll() {
         allStopped = true
     }
@@ -112,6 +127,9 @@ private class FakeTransport : MessageTransport {
         _incomingMessages.emit(endpointId to message)
     }
     suspend fun emitTransportError(error: TransportError) { _transportErrors.emit(error) }
+
+    /** Drives [discoveredEndpoints] so client reconnect/rediscovery logic can be exercised. */
+    fun setDiscovered(endpoints: List<DiscoveredEndpoint>) { _discoveredEndpoints.value = endpoints }
 
     companion object {
         private const val BUFFER_CAPACITY = 64
@@ -184,6 +202,45 @@ class GameSessionTest {
             // session-state mutations are controlled by the test scheduler (#61).
             gameLoopDispatcher = testDispatcher,
         )
+    }
+
+    /** Hosts a KIDS match with the host + one client (ep2), all greeted and ready. */
+    private suspend fun startTwoPlayerKidsMatch(session: GameSession) {
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+        session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+        transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
+        yield()
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+        session.startMatch()
+        yield()
+    }
+
+    /** Hosts a KIDS match with the host + two clients (ep2, ep3), every pair greeted and ready. */
+    private suspend fun startThreePlayerKidsMatch(session: GameSession) {
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        transport.emitIncoming("ep3", NetMessage.ClientHello("Carol"))
+        yield()
+        // Every ordered pair greets: host→{2,3}, 2→{1,3}, 3→{1,2}.
+        session.submitBow(toPlayerId = 2, bearingDegrees = 120f)
+        session.submitBow(toPlayerId = 3, bearingDegrees = 240f)
+        transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
+        transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 3, bearingDegrees = 200f))
+        transport.emitIncoming("ep3", NetMessage.Greeting(fromPlayerId = 3, toPlayerId = 1, bearingDegrees = 60f))
+        transport.emitIncoming("ep3", NetMessage.Greeting(fromPlayerId = 3, toPlayerId = 2, bearingDegrees = 20f))
+        yield()
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        transport.emitIncoming("ep3", NetMessage.CharacterChosen(spriteId = 2))
+        yield()
+        session.startMatch()
+        yield()
     }
 
     // ---------------------------------------------------------------------------
@@ -511,18 +568,122 @@ class GameSessionTest {
     }
 
     @Test
-    fun `client receives host disconnection emits PeerLost`() = testScope.runTest {
-        val session = buildSession()
-        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
-        yield()
-
-        session.sessionEvents.test {
-            transport.emitConnection(ConnectionEvent.Disconnected("host-ep"))
+    fun `client host loss enters reconnect grace and re-requests the rediscovered host`() =
+        testScope.runTest {
+            val session = buildSession()
+            session.joinLobby(playerName = "Bob", endpointId = "host-ep")
             yield()
-            assertEquals(SessionEvent.PeerLost, awaitItem())
-            cancelAndIgnoreRemainingEvents()
+            // A prior Connected captures the host name so rediscovery can re-match it.
+            transport.emitConnection(ConnectionEvent.Connected("host-ep", "Alice"))
+            yield()
+
+            session.sessionEvents.test {
+                transport.emitConnection(ConnectionEvent.Disconnected("host-ep"))
+                yield()
+                assertEquals(SessionEvent.PeerReconnecting, awaitItem())
+                assertTrue(transport.discoveryStarted)
+
+                // The host reappears under a new endpoint id; the client re-requests it.
+                transport.setDiscovered(listOf(DiscoveredEndpoint("host-ep2", "Alice")))
+                yield()
+                assertTrue(transport.connectionRequests.contains("host-ep2"))
+
+                // Re-establishing the link within the grace window dismisses the overlay.
+                transport.emitConnection(ConnectionEvent.Connected("host-ep2", "Alice"))
+                yield()
+                assertEquals(SessionEvent.PeerReconnected, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
         }
-    }
+
+    @Test
+    fun `client host loss falls back to PeerLost after the reconnect grace window`() =
+        testScope.runTest {
+            val session = buildSession()
+            session.joinLobby(playerName = "Bob", endpointId = "host-ep")
+            yield()
+
+            session.sessionEvents.test {
+                transport.emitConnection(ConnectionEvent.Disconnected("host-ep"))
+                yield()
+                assertEquals(SessionEvent.PeerReconnecting, awaitItem())
+
+                // No reconnection arrives; the grace window (8 s) elapses → terminal PeerLost.
+                delay(RECONNECT_GRACE_BUFFER_MILLIS)
+                assertEquals(SessionEvent.PeerLost, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `host holds dropped player slot during grace and resumes them on reconnect`() =
+        testScope.runTest {
+            var forfeitedId: Int? = null
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    object : NoOpEngine(rules, clk, scp) {
+                        override fun forfeitPlayer(playerId: Int) { forfeitedId = playerId }
+                    }
+                },
+            )
+            startThreePlayerKidsMatch(session)
+
+            // Bob (ep2) drops mid-match, then reconnects under a new endpoint before the window ends.
+            transport.emitConnection(ConnectionEvent.Disconnected("ep2"))
+            yield()
+            transport.emitIncoming("ep2b", NetMessage.ClientHello("Bob"))
+            yield()
+
+            // Reconnected: a fresh RoundStart is replayed to the returning endpoint.
+            assertTrue(transport.sentToEndpoint.any { it.first == "ep2b" && it.second is NetMessage.RoundStart })
+
+            // Even after the original grace window would have elapsed, Bob is not forfeited.
+            delay(RECONNECT_GRACE_BUFFER_MILLIS)
+            assertNull(forfeitedId)
+        }
+
+    @Test
+    fun `host forfeits dropped player and continues when enough players remain`() =
+        testScope.runTest {
+            var forfeitedId: Int? = null
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    object : NoOpEngine(rules, clk, scp) {
+                        override fun forfeitPlayer(playerId: Int) { forfeitedId = playerId }
+                    }
+                },
+            )
+            startThreePlayerKidsMatch(session)
+
+            session.sessionEvents.test {
+                assertEquals(SessionEvent.RoundStarted, awaitItem()) // replayed match-start event
+                transport.emitConnection(ConnectionEvent.Disconnected("ep2"))
+                yield()
+                // Grace elapses with 2 players (host + Carol) still present → forfeit, no abort.
+                delay(RECONNECT_GRACE_BUFFER_MILLIS)
+                assertEquals(2, forfeitedId)
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
+            assertEquals(2, session.lobby.value?.players?.size)
+        }
+
+    @Test
+    fun `host aborts match with PeerLost when a dropout leaves too few players`() =
+        testScope.runTest {
+            val session = buildSession()
+            startTwoPlayerKidsMatch(session)
+
+            session.sessionEvents.test {
+                assertEquals(SessionEvent.RoundStarted, awaitItem()) // replayed match-start event
+                transport.emitConnection(ConnectionEvent.Disconnected("ep2"))
+                yield()
+                // Only the host would remain (< MIN_PLAYERS) → the match aborts.
+                delay(RECONNECT_GRACE_BUFFER_MILLIS)
+                assertEquals(SessionEvent.PeerLost, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
 
     // ---------------------------------------------------------------------------
     // Kids round-end outcome wiring

@@ -32,6 +32,10 @@
     <string name="peer_lost_message">Die Verbindung zum anderen Gerät wurde unterbrochen. Du wurdest zum Startbildschirm zurückgeleitet.</string>
     <string name="peer_lost_ok">OK</string>
 
+    <!-- Reconnecting overlay -->
+    <string name="reconnecting_title">Verbinde erneut…</string>
+    <string name="reconnecting_message">Die Verbindung zum Host wurde unterbrochen. Es wird versucht, die Verbindung wiederherzustellen…</string>
+
     <!-- Lobby screen — shared -->
     <string name="lobby_title_host">Lobby (Host)</string>
     <string name="lobby_title_client">Lobby</string>

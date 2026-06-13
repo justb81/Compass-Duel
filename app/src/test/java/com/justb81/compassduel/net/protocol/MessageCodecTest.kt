@@ -182,6 +182,26 @@ class MessageCodecTest {
         assertRoundTrip(NetMessage.Regreet)
     }
 
+    // ---------------------------------------------------------------------------
+    // Reliable-delivery envelope
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `Reliable envelope round-trips with a nested control payload`() {
+        val payload = NetMessage.RoundStart(
+            mode = GameMode.STANDARD,
+            roundIndex = 0,
+            roundDurationSeconds = 60,
+            players = listOf(LobbyPlayer(id = 1, name = "Alice", element = Element.FIRE)),
+        )
+        assertRoundTrip(NetMessage.Reliable(seq = 7L, payload = payload))
+    }
+
+    @Test
+    fun `ControlAck round-trips correctly`() {
+        assertRoundTrip(NetMessage.ControlAck(seq = 42L))
+    }
+
     @Test
     fun `PlayerSnapshot movementWarning round-trips correctly`() {
         val snapshot = GameSnapshot(

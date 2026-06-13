@@ -142,6 +142,27 @@ connectionsClient.sendPayload(
 
 Initial connection setup takes 2â€“7 seconds [^6]. After that, latency for small `BYTES` payloads over BLE (~20ms) is fully acceptable [^3]. Game actions don't require a continuous data stream â€” only event-based payloads â€” which significantly relaxes latency requirements.
 
+#### Reliable control delivery
+
+Nearby `BYTES` delivery is best-effort, so the two message classes are treated differently.
+The high-frequency `StateBroadcast` stream (~10 Hz) stays lossy — a dropped snapshot is
+superseded by the next one. One-shot **control messages** (`RoundStart`, `RoundEnd`,
+`LobbyState`, `Rematch`, `Regreet`, and the lobby-setup client→host messages) cannot be
+reconstructed, so `ReliableMessageTransport` wraps them in a sequenced `Reliable` envelope:
+the receiver returns a `ControlAck` and delivers each sequence number exactly once, while the
+sender retransmits until the ack arrives (or the endpoint drops). This prevents a lost
+`RoundStart`/`RoundEnd` from stranding a client on the wrong screen.
+
+#### Disconnects and reconnects
+
+A mid-round disconnect no longer aborts an otherwise-viable match. The Host holds the dropped
+player's seat through a short reconnect grace window (the player simply goes idle); if they
+rejoin in time they resume the round, otherwise the Host forfeits them and **continues the
+round when at least `MIN_PLAYERS` remain**, ending the match only when too few players are
+left. On the Client, a lost Host link opens a matching grace window that re-discovers and
+re-requests the Host before falling back to a terminal "connection lost". Host *migration*
+(promoting a Client to Host) remains out of scope.
+
 ### Sensor Stack
 
 #### Compass (Azimuth)

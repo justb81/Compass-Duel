@@ -381,4 +381,34 @@ sealed interface NetMessage {
     @Serializable
     @SerialName("Regreet")
     data object Regreet : NetMessage
+
+    // -------------------------------------------------------------------------
+    // Reliable-delivery envelope (either direction)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Envelope that wraps a control message for reliable delivery (see
+     * [com.justb81.compassduel.net.ReliableMessageTransport]).
+     *
+     * Control messages ([LobbyState], [RoundStart], [RoundEnd], [Rematch], [Regreet] and the
+     * lobby-setup client→host messages) carry state transitions that cannot be reconstructed
+     * from the next message, so — unlike the lossy 10 Hz [StateBroadcast] stream — they are
+     * sent inside a [Reliable] envelope: the receiver acknowledges each [seq] with a
+     * [ControlAck] and de-duplicates re-sends, while the sender retransmits until acked.
+     *
+     * @param seq Per-endpoint monotonically increasing sequence number assigned by the sender.
+     * @param payload The wrapped control message (serialized polymorphically via its own `type`).
+     */
+    @Serializable
+    @SerialName("Reliable")
+    data class Reliable(val seq: Long, val payload: NetMessage) : NetMessage
+
+    /**
+     * Acknowledges receipt of a [Reliable] envelope so the sender can stop retransmitting it.
+     *
+     * @param seq The [Reliable.seq] being acknowledged.
+     */
+    @Serializable
+    @SerialName("ControlAck")
+    data class ControlAck(val seq: Long) : NetMessage
 }

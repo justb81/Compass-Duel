@@ -32,6 +32,10 @@
     <string name="peer_lost_message">The connection to the other device was lost. You have been returned to the home screen.</string>
     <string name="peer_lost_ok">OK</string>
 
+    <!-- Reconnecting overlay -->
+    <string name="reconnecting_title">Reconnecting…</string>
+    <string name="reconnecting_message">The connection to the host dropped. Trying to reconnect…</string>
+
     <!-- Lobby screen — shared -->
     <string name="lobby_title_host">Lobby (Host)</string>
     <string name="lobby_title_client">Lobby</string>

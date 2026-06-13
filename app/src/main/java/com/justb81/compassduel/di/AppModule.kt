@@ -13,8 +13,8 @@ import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.engine.GameEngine
 import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.NearbyConnectionManager
+import com.justb81.compassduel.net.ReliableMessageTransport
 import com.justb81.compassduel.session.GameEngineFactory
-import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -66,57 +66,61 @@ private val Context.userPreferencesDataStore: DataStore<Preferences> by preferen
  */
 @Module
 @InstallIn(SingletonComponent::class)
-abstract class AppModule {
+object AppModule {
 
-    /** Binds the concrete [NearbyConnectionManager] to the [MessageTransport] interface. */
-    @Binds
+    /**
+     * Binds [MessageTransport] to the [ReliableMessageTransport] decorator wrapping the
+     * concrete [NearbyConnectionManager], so control messages get reliable delivery while
+     * the high-frequency state stream stays best-effort.
+     */
+    @Provides
     @Singleton
-    abstract fun bindMessageTransport(impl: NearbyConnectionManager): MessageTransport
+    fun provideMessageTransport(
+        impl: NearbyConnectionManager,
+        @ApplicationScope scope: CoroutineScope,
+    ): MessageTransport = ReliableMessageTransport(impl, scope)
 
-    companion object {
+    @Provides
+    @Singleton
+    fun provideConnectionsClient(@ApplicationContext context: Context): ConnectionsClient =
+        Nearby.getConnectionsClient(context)
 
-        @Provides
-        @Singleton
-        fun provideConnectionsClient(@ApplicationContext context: Context): ConnectionsClient =
-            Nearby.getConnectionsClient(context)
+    @Provides
+    @Singleton
+    fun provideSensorManager(@ApplicationContext context: Context): SensorManager =
+        context.getSystemService(SensorManager::class.java)
 
-        @Provides
-        @Singleton
-        fun provideSensorManager(@ApplicationContext context: Context): SensorManager =
-            context.getSystemService(SensorManager::class.java)
+    @Provides
+    @Singleton
+    fun provideVibrator(@ApplicationContext context: Context): Vibrator =
+        context.getSystemService(VibratorManager::class.java).defaultVibrator
 
-        @Provides
-        @Singleton
-        fun provideVibrator(@ApplicationContext context: Context): Vibrator =
-            context.getSystemService(VibratorManager::class.java).defaultVibrator
-
-        @Provides
-        @Singleton
-        fun provideGameClock(): GameClock = object : GameClock {
-            override fun nowMillis(): Long = System.currentTimeMillis()
-        }
-
-        @Provides
-        @Singleton
-        @ApplicationScope
-        fun provideApplicationScope(): CoroutineScope =
-            CoroutineScope(SupervisorJob() + Dispatchers.Default)
-
-        @Provides
-        @Singleton
-        @GameLoopDispatcher
-        fun provideGameLoopDispatcher(): CoroutineDispatcher =
-            Dispatchers.Default.limitedParallelism(1)
-
-        @Provides
-        @Singleton
-        fun provideGameEngineFactory(): GameEngineFactory =
-            GameEngineFactory { rules, clock, scope -> GameEngine(rules, clock, scope) }
-
-        @Provides
-        @Singleton
-        fun provideUserPreferencesDataStore(
-            @ApplicationContext context: Context,
-        ): DataStore<Preferences> = context.userPreferencesDataStore
+    @Provides
+    @Singleton
+    fun provideGameClock(): GameClock = object : GameClock {
+        override fun nowMillis(): Long = System.currentTimeMillis()
     }
+
+    @Provides
+    @Singleton
+    @ApplicationScope
+    fun provideApplicationScope(): CoroutineScope =
+        CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    @Provides
+    @Singleton
+    @GameLoopDispatcher
+    fun provideGameLoopDispatcher(): CoroutineDispatcher =
+        Dispatchers.Default.limitedParallelism(1)
+
+    @Provides
+    @Singleton
+    fun provideGameEngineFactory(): GameEngineFactory =
+        GameEngineFactory { rules, clock, scope -> GameEngine(rules, clock, scope) }
+
+    @Provides
+    @Singleton
+    fun provideUserPreferencesDataStore(
+        @ApplicationContext context: Context,
+    ): DataStore<Preferences> = context.userPreferencesDataStore
 }

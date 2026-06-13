@@ -78,6 +78,20 @@ interface MessageTransport {
     /** Send [message] to all currently connected endpoints. */
     fun broadcast(message: NetMessage)
 
+    /**
+     * Send [message] to a single [endpointId] reliably: the message is acknowledged by the
+     * receiver and retransmitted until the ack arrives or the endpoint disconnects. Use for
+     * control messages whose loss would strand a peer; high-frequency state uses [send].
+     */
+    fun sendReliable(endpointId: String, message: NetMessage)
+
+    /**
+     * Send [message] reliably to all currently connected endpoints (see [sendReliable]). Use
+     * for control broadcasts ([NetMessage.RoundStart], [NetMessage.RoundEnd], …); the lossy
+     * [broadcast] is for the high-frequency [NetMessage.StateBroadcast] stream.
+     */
+    fun broadcastReliable(message: NetMessage)
+
     /** Stop advertising, discovery, and all connections. */
     fun stopAll()
 }
