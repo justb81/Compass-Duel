@@ -6,6 +6,8 @@ import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.hardware.TriggerEvent
 import android.hardware.TriggerEventListener
+import android.os.Handler
+import com.justb81.compassduel.di.SensorHandler
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -41,6 +43,7 @@ data class MovementEvent(
 @Singleton
 class MovementDetector @Inject constructor(
     private val sensorManager: SensorManager,
+    @SensorHandler private val sensorHandler: Handler,
 ) {
 
     /** Cold flow of movement events; completes when the collector's scope is cancelled. */
@@ -70,7 +73,7 @@ class MovementDetector @Inject constructor(
         }
 
         if (stepListener != null && stepSensor != null) {
-            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+            sensorManager.registerListener(stepListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL, sensorHandler)
         }
         if (triggerListener != null && significantSensor != null) {
             sensorManager.requestTriggerSensor(triggerListener, significantSensor)

@@ -53,6 +53,7 @@ import com.justb81.compassduel.net.protocol.PlayerStatus
 import com.justb81.compassduel.ui.components.ActionEffectOverlay
 import com.justb81.compassduel.ui.components.CompassRing
 import com.justb81.compassduel.ui.components.ShieldIndicator
+import kotlinx.coroutines.flow.StateFlow
 
 private val SCREEN_PADDING_DP = 16.dp
 private val SECTION_SPACING_DP = 8.dp
@@ -102,6 +103,7 @@ fun GameScreen(
             is GameUiState.Countdown -> CountdownContent(state)
             is GameUiState.Playing -> PlayingContent(
                 state = state,
+                compassStateFlow = viewModel.compassState,
                 onFire = viewModel::fireTouch,
                 onShieldPressChange = viewModel::setTouchShield,
             )
@@ -339,6 +341,7 @@ private fun CountdownContent(state: GameUiState.Countdown) {
 @Composable
 private fun PlayingContent(
     state: GameUiState.Playing,
+    compassStateFlow: StateFlow<CompassUiState>,
     onFire: () -> Unit,
     onShieldPressChange: (Boolean) -> Unit,
 ) {
@@ -349,57 +352,29 @@ private fun PlayingContent(
                 .padding(SCREEN_PADDING_DP),
             verticalArrangement = Arrangement.SpaceBetween,
         ) {
-            // Top HUD — mode-branched
+            // Top HUD — mode-branched. Recomposes only at snapshot cadence; the
+            // sensor-rate compass slice is isolated in CompassSection below (#71).
             when (state.mode) {
                 GameMode.STANDARD -> StandardHud(state)
                 GameMode.KIDS -> KidsHud(state)
             }
 
-            // Compass ring — ring rotates with local sensor at full rate.
-            // The action-effect overlay is layered directly on top of the ring
-            // and shares its geometry so projectiles/impacts land on the reticle.
+            // Compass ring + shield indicator + effect overlay, isolated in
+            // CompassSection so it recomposes at sensor rate without re-running the HUD (#71).
             //
             // Double-tapping anywhere on the compass area fires (touch alternative to
             // the swing gesture). The detector lives on this box — not the whole
             // screen — so it stays clear of the hold-to-shield button below and the
             // help "?" affordance the parent draws on top.
-            val warningColor = if (state.mode == GameMode.STANDARD) {
-                Color.Red
-            } else {
-                WARNING_COLOR_KIDS
-            }
-            Box(
+            CompassSection(
+                state = state,
+                compassStateFlow = compassStateFlow,
                 modifier = Modifier
                     .weight(1f)
                     .pointerInput(state.isEliminated) {
                         detectTapGestures(onDoubleTap = { if (!state.isEliminated) onFire() })
                     },
-                contentAlignment = Alignment.Center,
-            ) {
-                CompassRing(
-                    currentAzimuthDegrees = state.azimuthDegrees,
-                    targets = state.compassTargets,
-                    isTargeted = state.warningActive,
-                    warningColor = warningColor,
-                    highlightColor = HIGHLIGHT_COLOR,
-                )
-                ActionEffectOverlay(
-                    effect = state.actionEffect,
-                    mode = state.mode,
-                    shielding = state.shielding,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(COMPASS_ASPECT_RATIO),
-                )
-                if (state.mode == GameMode.STANDARD) {
-                    ShieldIndicator(
-                        active = state.shielding,
-                        armProgress = state.shieldArmProgress,
-                        remainingFraction = state.shieldRemainingFraction,
-                        modifier = Modifier.size(SHIELD_INDICATOR_SIZE),
-                    )
-                }
-            }
+            )
 
             // Hold-to-shield button (touch alternative to the upright-hold gesture).
             // Hidden once eliminated — a spectator has nothing to shield.
@@ -431,6 +406,65 @@ private fun PlayingContent(
                     style = MaterialTheme.typography.headlineMedium,
                     color = Color.White,
                     textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * The compass ring + shield indicator + action-effect overlay, isolated from the
+ * HUD so it can recompose at full sensor rate without re-running the HUD (#71).
+ *
+ * The high-frequency [CompassUiState] (azimuth, shield-arm progress, debug aim) is
+ * collected here; snapshot-cadence values (targets, warning, shield budget) come from
+ * [state]. The action-effect overlay shares the ring's geometry so projectiles/impacts
+ * land on the reticle.
+ */
+@Composable
+private fun CompassSection(
+    state: GameUiState.Playing,
+    compassStateFlow: StateFlow<CompassUiState>,
+    modifier: Modifier = Modifier,
+) {
+    val compass by compassStateFlow.collectAsStateWithLifecycle()
+    val warningColor = if (state.mode == GameMode.STANDARD) Color.Red else WARNING_COLOR_KIDS
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        CompassRing(
+            currentAzimuthDegrees = compass.azimuthDegrees,
+            targets = state.compassTargets,
+            isTargeted = state.warningActive,
+            warningColor = warningColor,
+            highlightColor = HIGHLIGHT_COLOR,
+        )
+        ActionEffectOverlay(
+            effect = state.actionEffect,
+            mode = state.mode,
+            shielding = state.shielding,
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(COMPASS_ASPECT_RATIO),
+        )
+        if (state.mode == GameMode.STANDARD) {
+            ShieldIndicator(
+                active = state.shielding,
+                armProgress = compass.shieldArmProgress,
+                remainingFraction = state.shieldRemainingFraction,
+                modifier = Modifier.size(SHIELD_INDICATOR_SIZE),
+            )
+        }
+        if (BuildConfig.DEBUG) {
+            compass.debugAimDegrees?.let { aim ->
+                Text(
+                    text = "Az:%.1f Aim:%.1f".format(compass.azimuthDegrees, aim),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(top = SECTION_SPACING_DP),
                 )
             }
         }
@@ -477,16 +511,6 @@ private fun StandardHud(state: GameUiState.Playing) {
                 }
             }
         }
-        // Debug readout (debug builds only)
-        if (BuildConfig.DEBUG) {
-            state.debugAimDegrees?.let { aim ->
-                Text(
-                    text = "Az:%.1f Aim:%.1f".format(state.azimuthDegrees, aim),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
     }
 }
 
@@ -523,16 +547,6 @@ private fun KidsHud(state: GameUiState.Playing) {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.tertiary,
             )
-        }
-        // Debug readout (debug builds only)
-        if (BuildConfig.DEBUG) {
-            state.debugAimDegrees?.let { aim ->
-                Text(
-                    text = "Az:%.1f Aim:%.1f".format(state.azimuthDegrees, aim),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
     }
 }

@@ -4,9 +4,16 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import com.justb81.compassduel.di.ApplicationScope
+import com.justb81.compassduel.di.SensorHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.shareIn
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,23 +44,43 @@ data class OrientationSample(
 )
 
 /**
- * Produces a [Flow] of [OrientationSample] values from the device's rotation-vector sensor.
+ * Produces a hot, shared [Flow] of [OrientationSample] values from the device's
+ * rotation-vector sensor.
  *
- * The sensor is registered when the flow is collected and unregistered when collection
- * ends (via `awaitClose`). The [SensorManager] is injected so this class is easily
- * swapped out in environments without a real sensor (but it is not unit-tested directly).
+ * The physical sensor is registered once and the readings are fanned out to all collectors
+ * via [shareIn] (#72): the Game VM compass, the lobby bow detector and the [InputPipeline]
+ * share a single registration instead of each opening their own `callbackFlow`. Listener
+ * callbacks are posted to the injected [SensorHandler] thread so the rotation-matrix math
+ * runs off the main looper (#71).
+ *
+ * The [SensorManager] is injected so this class is easily swapped out in environments
+ * without a real sensor (but it is not unit-tested directly).
  */
 @Singleton
 class OrientationSensor @Inject constructor(
     private val sensorManager: SensorManager,
+    @SensorHandler private val sensorHandler: Handler,
+    @ApplicationScope private val scope: CoroutineScope,
 ) {
 
     /**
-     * Returns a cold [Flow] of orientation readings at [SensorManager.SENSOR_DELAY_GAME] rate.
+     * Hot, shared [Flow] of orientation readings at [SensorManager.SENSOR_DELAY_GAME] rate.
      *
-     * The flow completes when the collector's scope is cancelled.
+     * `replay = 1` lets a late subscriber (e.g. the compass ring) receive the most recent
+     * azimuth immediately; [SharingStarted.WhileSubscribed] unregisters the physical sensor
+     * once the last collector leaves, after a short grace timeout to avoid churn across
+     * screen transitions.
      */
-    fun samples(): Flow<OrientationSample> = callbackFlow {
+    private val shared: SharedFlow<OrientationSample> = cold().shareIn(
+        scope = scope,
+        started = SharingStarted.WhileSubscribed(stopTimeoutMillis = SENSOR_STOP_TIMEOUT_MILLIS),
+        replay = 1,
+    )
+
+    /** Returns the shared orientation stream. */
+    fun samples(): Flow<OrientationSample> = shared
+
+    private fun cold(): Flow<OrientationSample> = callbackFlow {
         val rotationSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ROTATION_VECTOR)
             ?: run { close(); return@callbackFlow }
 
@@ -91,7 +118,7 @@ class OrientationSensor @Inject constructor(
             }
         }
 
-        sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME)
+        sensorManager.registerListener(listener, rotationSensor, SensorManager.SENSOR_DELAY_GAME, sensorHandler)
         awaitClose { sensorManager.unregisterListener(listener) }
     }
 
@@ -99,5 +126,8 @@ class OrientationSensor @Inject constructor(
         private const val MATRIX_SIZE = 9
         private const val ORIENTATION_COMPONENTS = 3
         private const val FULL_CIRCLE = 360f
+
+        /** Grace period before the physical sensor is unregistered after the last collector leaves. */
+        private const val SENSOR_STOP_TIMEOUT_MILLIS = 2_000L
     }
 }

@@ -79,7 +79,6 @@ sealed interface GameUiState {
      * @param myStatus Name of the local player's [com.justb81.compassduel.net.protocol.PlayerStatus].
      * @param isEliminated True when the local player has been eliminated (Standard only).
      * @param compassTargets Opponent dots for the [com.justb81.compassduel.ui.components.CompassRing].
-     * @param azimuthDegrees Local player's raw azimuth at sensor rate.
      * @param remainingMillis Milliseconds remaining in the round.
      * @param roundWins Round-win counts per player id (Standard only).
      * @param maxRoundWins Maximum round wins needed to win the match.
@@ -88,7 +87,10 @@ sealed interface GameUiState {
      * @param flashEvent Transient overlay flash; null when no flash is active.
      * @param actionEffect Transient projectile/impact/defensive visual; null when none is active.
      * @param restingUntilMillis Epoch millis until which the local player is resting (Kids).
-     * @param debugAimDegrees Calibrated aim in debug builds; null in release.
+     *
+     * High-frequency sensor-driven values (azimuth, shield-arm progress, debug aim) are
+     * **not** here — they live in [CompassUiState] so a new sample only recomposes the
+     * compass sub-tree, not the whole HUD (#71).
      */
     @Suppress("LongParameterList")
     data class Playing(
@@ -100,7 +102,6 @@ sealed interface GameUiState {
         val myStatus: String,
         val isEliminated: Boolean,
         val compassTargets: List<CompassTarget>,
-        val azimuthDegrees: Float,
         val remainingMillis: Long,
         val roundWins: Map<Int, Int>,
         val maxRoundWins: Int,
@@ -109,15 +110,28 @@ sealed interface GameUiState {
         val flashEvent: FlashEvent?,
         val actionEffect: ActionEffect?,
         val shielding: Boolean,
-        val shieldArmProgress: Float,
         val shieldRemainingFraction: Float,
         val restingUntilMillis: Long,
-        val debugAimDegrees: Float?,
     ) : GameUiState
 
     /** ROUND_OVER phase — match-over navigation is handled by the nav graph. */
     data object RoundOver : GameUiState
 }
+
+/**
+ * High-frequency, sensor-rate slice of the game screen, kept separate from
+ * [GameUiState.Playing] so a ~50 Hz orientation sample only recomposes the compass
+ * sub-tree (ring, shield indicator, effect overlay) rather than the entire HUD (#71).
+ *
+ * @param azimuthDegrees Local player's raw azimuth in `[0, 360)`.
+ * @param shieldArmProgress Local shield arming progress `[0, 1]` (loading ring).
+ * @param debugAimDegrees Live aim in debug builds; null in release.
+ */
+data class CompassUiState(
+    val azimuthDegrees: Float = 0f,
+    val shieldArmProgress: Float = 0f,
+    val debugAimDegrees: Float? = null,
+)
 
 /**
  * Transient overlay flash event for game screen feedback.
@@ -167,6 +181,16 @@ class GameViewModel @Inject constructor(
         GameUiState.Countdown(secondsLeft = INITIAL_COUNTDOWN_SECONDS, mode = GameMode.STANDARD),
     )
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
+
+    // High-frequency compass slice, updated at sensor rate. Kept separate from
+    // _uiState so an orientation sample only recomposes the compass sub-tree (#71).
+    private val _compassState = MutableStateFlow(CompassUiState())
+    val compassState: StateFlow<CompassUiState> = _compassState.asStateFlow()
+
+    // Single-slot timers for transient overlays (#74): a new value restarts the
+    // auto-clear delay via collectLatest instead of launching a coroutine per event.
+    private val flashSlot = MutableStateFlow<FlashEvent?>(null)
+    private val effectSlot = MutableStateFlow<ActionEffect?>(null)
 
     // Latest raw azimuth from the sensor (updated at sensor rate).
     // Null until the first orientation sample has been received.
@@ -219,6 +243,7 @@ class GameViewModel @Inject constructor(
         observeRoundEnd()
         observeMyBearings()
         observeMovement()
+        observeTransientEffects()
     }
 
     private fun observeMyBearings() {
@@ -244,15 +269,39 @@ class GameViewModel @Inject constructor(
             orientationSensor.samples().collect { sample ->
                 latestRawAzimuth = sample.azimuthDegrees
 
-                // Update the compass ring in real time during PLAYING.
-                val current = _uiState.value
-                if (current is GameUiState.Playing) {
-                    _uiState.value = current.copy(
-                        azimuthDegrees = sample.azimuthDegrees,
-                        shieldArmProgress = latestShieldArmProgress,
-                        debugAimDegrees = if (BuildConfig.DEBUG) sample.azimuthDegrees else null,
-                    )
-                }
+                // Update only the compass slice in real time — the HUD (driven by
+                // _uiState at snapshot cadence) does not recompose on this (#71).
+                _compassState.value = CompassUiState(
+                    azimuthDegrees = sample.azimuthDegrees,
+                    shieldArmProgress = latestShieldArmProgress,
+                    debugAimDegrees = if (BuildConfig.DEBUG) sample.azimuthDegrees else null,
+                )
+            }
+        }
+    }
+
+    /**
+     * Single auto-clear timer per transient-overlay slot (#74). [collectLatest]
+     * cancels the previous [delay] when a new flash/effect fires, so at most one
+     * delay coroutine per slot is ever live — no per-event coroutine churn.
+     */
+    private fun observeTransientEffects() {
+        viewModelScope.launch {
+            flashSlot.collectLatest { flash ->
+                if (flash == null) return@collectLatest
+                delay(FLASH_DURATION_MILLIS)
+                (_uiState.value as? GameUiState.Playing)
+                    ?.takeIf { it.flashEvent == flash }
+                    ?.let { _uiState.value = it.copy(flashEvent = null) }
+            }
+        }
+        viewModelScope.launch {
+            effectSlot.collectLatest { effect ->
+                if (effect == null) return@collectLatest
+                delay(ACTION_EFFECT_DURATION_MILLIS)
+                (_uiState.value as? GameUiState.Playing)
+                    ?.takeIf { it.actionEffect == effect }
+                    ?.let { _uiState.value = it.copy(actionEffect = null) }
             }
         }
     }
@@ -359,13 +408,8 @@ class GameViewModel @Inject constructor(
         val resolvedFlash = flash ?: existingFlash
 
         if (flash != null) {
-            viewModelScope.launch {
-                delay(FLASH_DURATION_MILLIS)
-                val s = _uiState.value
-                if (s is GameUiState.Playing && s.flashEvent == flash) {
-                    _uiState.value = s.copy(flashEvent = null)
-                }
-            }
+            // Arm the single-slot flash timer; collectLatest restarts the delay (#74).
+            flashSlot.value = flash
         }
 
         val myStatus = mySnap?.status ?: PlayerStatus.IDLE
@@ -380,7 +424,6 @@ class GameViewModel @Inject constructor(
             myStatus = mySnap?.status?.name ?: PlayerStatus.IDLE.name,
             isEliminated = mySnap?.status == PlayerStatus.ELIMINATED,
             compassTargets = compassTargets,
-            azimuthDegrees = latestRawAzimuth ?: 0f,
             remainingMillis = snapshot.remainingMillis,
             roundWins = lastKnownRoundWins,
             maxRoundWins = StandardRules.ROUNDS_TO_WIN,
@@ -389,10 +432,8 @@ class GameViewModel @Inject constructor(
             flashEvent = resolvedFlash,
             actionEffect = resolvedEffect,
             shielding = myStatus == PlayerStatus.SHIELDING,
-            shieldArmProgress = latestShieldArmProgress,
             shieldRemainingFraction = shieldRemainingFraction(mySnap),
             restingUntilMillis = mySnap?.restingUntilMillis ?: 0L,
-            debugAimDegrees = if (BuildConfig.DEBUG) latestRawAzimuth else null,
         )
     }
 
@@ -564,13 +605,8 @@ class GameViewModel @Inject constructor(
             ActionEffect(kind = kind, element = element, triggerId = actionEffectTrigger)
         }
         if (newEffect != null) {
-            viewModelScope.launch {
-                delay(ACTION_EFFECT_DURATION_MILLIS)
-                val s = _uiState.value
-                if (s is GameUiState.Playing && s.actionEffect == newEffect) {
-                    _uiState.value = s.copy(actionEffect = null)
-                }
-            }
+            // Arm the single-slot effect timer; collectLatest restarts the delay (#74).
+            effectSlot.value = newEffect
         }
         return newEffect ?: (_uiState.value as? GameUiState.Playing)?.actionEffect
     }
