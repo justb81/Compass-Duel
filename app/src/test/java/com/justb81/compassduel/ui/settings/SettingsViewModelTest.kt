@@ -6,10 +6,11 @@ import androidx.datastore.preferences.core.Preferences
 import com.justb81.compassduel.data.preferences.ThemePreference
 import com.justb81.compassduel.data.preferences.UserPreferencesRepository
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
@@ -22,9 +23,10 @@ import org.junit.jupiter.api.io.TempDir
 import java.io.File
 
 /** Tests for [SettingsViewModel] — reads the persisted theme and writes selections through. */
+@OptIn(ExperimentalCoroutinesApi::class)
 class SettingsViewModelTest {
 
-    private val testDispatcher = StandardTestDispatcher()
+    private val testDispatcher = UnconfinedTestDispatcher()
     private val testScope = TestScope(testDispatcher)
 
     @TempDir
