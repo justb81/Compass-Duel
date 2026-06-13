@@ -13,6 +13,7 @@ import com.justb81.compassduel.net.protocol.GameEventType
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.GameSnapshot
 import com.justb81.compassduel.net.protocol.LobbyPlayer
+import com.justb81.compassduel.net.protocol.PlayerSnapshot
 import com.justb81.compassduel.net.protocol.PlayerStatus
 import com.justb81.compassduel.net.protocol.RoundPhase
 import com.justb81.compassduel.sensor.AimCalibration
@@ -420,12 +421,15 @@ class GameViewModel @Inject constructor(
             actionEffect = resolvedEffect,
             shielding = myStatus == PlayerStatus.SHIELDING,
             shieldArmProgress = latestShieldArmProgress,
-            shieldRemainingFraction =
-                (mySnap?.shieldRemainingMillis ?: 0L).toFloat() / StandardRules.SHIELD_BUDGET_MILLIS,
+            shieldRemainingFraction = shieldRemainingFraction(mySnap),
             restingUntilMillis = mySnap?.restingUntilMillis ?: 0L,
             debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
         )
     }
+
+    /** Remaining shield budget as a `[0, 1]` fraction of [StandardRules.SHIELD_BUDGET_MILLIS]. */
+    private fun shieldRemainingFraction(snap: PlayerSnapshot?): Float =
+        (snap?.shieldRemainingMillis ?: 0L).toFloat() / StandardRules.SHIELD_BUDGET_MILLIS
 
     private fun buildCompassTargets(
         snapshot: GameSnapshot,

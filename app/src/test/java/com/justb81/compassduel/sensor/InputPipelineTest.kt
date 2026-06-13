@@ -78,7 +78,10 @@ class InputPipelineTest {
         val clock = steppingClock(GestureThresholds.SHIELD_HOLD_MILLIS)
 
         InputPipeline.processSamples(
-            orientationFlow = flow { emit(upright()); emit(upright()) },
+            orientationFlow = flow {
+                emit(upright())
+                emit(upright())
+            },
             accelFlow = emptyFlow(),
             clock = clock,
             playerId = PLAYER_ID,
@@ -144,7 +147,10 @@ class InputPipelineTest {
         val clock = steppingClock(GestureThresholds.SHIELD_HOLD_MILLIS)
 
         InputPipeline.processSamples(
-            orientationFlow = flow { emit(upright()); emit(upright()) },
+            orientationFlow = flow {
+                emit(upright())
+                emit(upright())
+            },
             accelFlow = emptyFlow(),
             clock = clock,
             playerId = PLAYER_ID,
