@@ -143,6 +143,31 @@ for Kotlin/Android changes. In that situation, surface the skip in the PR
 description and treat a red `Test & Build` check as a blocker. Do **not** pass
 `--no-verify`.
 
+#### CI-only failure modes (no SDK locally → these only surface in CI)
+
+When the Gradle scope is skipped, CI is the sole gate for Kotlin. These recur —
+check them before pushing to save a red-CI round-trip:
+
+- **`@Volatile` applies to fields, not local variables.** A `var` captured by a
+  closure (e.g. a `SensorEventListener` inside a `callbackFlow`) cannot be
+  `@Volatile`; use `AtomicInteger`/`AtomicReference` for cross-thread visibility.
+  `@Volatile` is valid only on class-level properties.
+- **Test doubles need `open`.** `GameEngine` is `open` and injected via the
+  `GameEngineFactory` fun-interface so tests can supply fakes. Any engine method
+  a test overrides (`submitInput`, `roundOutcome`, …) must also be `open`, and a
+  file-private test helper (e.g. `NoOpEngine`) must be `open` to be subclassed by
+  an anonymous `object :` in another test.
+- **detekt is strict and has no baseline** (`config/detekt/detekt.yml`). Frequent
+  trip-ups: `ReturnCount` max 4 (extract per-branch helpers instead of stacking
+  guard `return`s), `LargeClass` threshold 600 (split large suites or
+  `@Suppress("LargeClass")` with a justifying comment), `NoUnusedImports`,
+  `NoConsecutiveBlankLines`, and the spacing rules around
+  annotated/commented declarations (`SpacingBetweenDeclarationsWith…`).
+- **Host trust-boundary tests.** The client now rejects messages whose
+  `endpointId != hostEndpointId` (and the host rejects host→client message
+  types). Client-incoming tests must call `connectTo("host-ep")` to register the
+  host endpoint before emitting host messages, or they are correctly dropped.
+
 ### Git Workflow
 
 - **Never push directly to `main`.** All changes go through a PR.
@@ -150,6 +175,9 @@ description and treat a red `Test & Build` check as a blocker. Do **not** pass
 - Open a PR, wait for a green `Test & Build` check, then squash-merge.
 - Branch naming: `feature/`, `fix/`, `docs/`, `chore/`. The `release-please--`
   prefix is reserved for the release-please bot.
+- **To auto-close issues on merge, put `Closes #N` in the PR description — one
+  keyword per issue.** A bare `(#N)` in a commit message only links, and
+  `Closes #1, #2` closes only the first; use `Closes #1, closes #2, …`.
 
 ### Versioning & Release
 
