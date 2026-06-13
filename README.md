@@ -125,6 +125,7 @@ Compass-Duel/
 │   ├── scripts/append-download-links.sh
 │   └── workflows/
 │       ├── build-android.yml   CI: test + detekt + lint + build on push/PR
+│       ├── workflow-lint.yml   CI: actionlint + release security validator
 │       └── release.yml         CD: release-please + signed APK/AAB + Play Store
 └── gradle/libs.versions.toml   Version catalog
 ```
@@ -149,6 +150,10 @@ git config core.hooksPath .githooks
 
 - **`build-android.yml`** — runs unit tests, detekt and Android Lint, and
   uploads SARIF to GitHub code scanning on every push/PR.
+- **`workflow-lint.yml`** — runs `actionlint` and `validate-release-security.py`
+  on any change to `.github/workflows/**`, `.github/actions/**`, or the validator
+  itself, so the release signing-secret hygiene gate is enforced server-side
+  (not only in the opt-in pre-commit hook).
 - **`release.yml`** — release-please opens a release PR from Conventional
   Commits; merging it tags a release, builds a **signed** APK + AAB, attaches
   them (plus the R8 mapping) to the GitHub Release, and uploads the AAB to the

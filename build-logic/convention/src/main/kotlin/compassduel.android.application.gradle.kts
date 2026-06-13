@@ -19,6 +19,16 @@ val libs = the<LibrariesForLibs>()
 // the secret is absent and the workflow sets the variable to '' as a fallback).
 val keystoreFile = providers.environmentVariable("KEYSTORE_FILE").orNull?.takeIf { it.isNotBlank() }
 
+// Opt-in: sign the debug build with the release keystore. This is OFF by default
+// so the mere presence of KEYSTORE_FILE can never produce a debuggable APK signed
+// by the production release key (which would blur the debug/release trust boundary).
+// Enable it only when you deliberately want debug/release to share an upgrade
+// certificate, via -Pcompassduel.signing.debugWithRelease=true.
+val signDebugWithRelease = providers
+    .gradleProperty("compassduel.signing.debugWithRelease")
+    .map(String::toBoolean)
+    .getOrElse(false)
+
 android {
     compileSdk = 37
 
@@ -35,12 +45,16 @@ android {
 
     buildTypes {
         debug {
-            // Use the release keystore for debug builds when available so that debug
-            // and release APKs share the same signing certificate. Without this,
-            // upgrading from a CI debug APK to a release APK fails with
-            // INSTALL_FAILED_UPDATE_INCOMPATIBLE because each runner generates a
-            // different ephemeral debug.keystore.
-            if (keystoreFile != null) {
+            // Sign debug builds with the release keystore ONLY when explicitly
+            // opted in (compassduel.signing.debugWithRelease=true) AND a keystore
+            // is configured. This lets debug and release APKs share an upgrade
+            // certificate when intended — without it, upgrading from a CI debug
+            // APK to a release APK fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE
+            // because each runner generates a different ephemeral debug.keystore.
+            // Gating on an explicit flag (not the mere presence of KEYSTORE_FILE)
+            // keeps the production release key off debuggable debug variants by
+            // default.
+            if (keystoreFile != null && signDebugWithRelease) {
                 signingConfig = signingConfigs.getByName("release")
             }
         }

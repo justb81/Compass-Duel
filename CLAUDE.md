@@ -66,9 +66,9 @@ Compass-Duel/
 │   └── validate-release-security.py  Validates release.yml signing-secret hygiene
 ├── .githooks/pre-commit        Delegates to scripts/precommit.sh
 ├── .github/
-│   ├── actions/setup-android-build/action.yml   Composite: checkout + JDK 17 + Gradle
+│   ├── actions/setup-android-build/action.yml   Composite: wrapper-validation + JDK 17 + Gradle
 │   ├── scripts/append-download-links.sh
-│   └── workflows/{build-android,release}.yml
+│   └── workflows/{build-android,workflow-lint,release}.yml
 └── gradle/libs.versions.toml   Version catalog (single source of truth)
 ```
 
@@ -127,6 +127,12 @@ The keystore path is supplied via the `KEYSTORE_FILE` environment variable (not
 a secret). The convention plugin reads the signing properties via
 `providers.gradleProperty("compassduel.signing.*")`.
 
+The **release** build type uses the keystore whenever `KEYSTORE_FILE` is set. The
+**debug** build type is signed with the release keystore only when you also opt in
+with `-Pcompassduel.signing.debugWithRelease=true` (off by default) — this keeps
+the production release key off debuggable debug variants unless deliberately
+sharing an upgrade certificate.
+
 ### Local pre-commit checks
 
 `scripts/precommit.sh` runs the same test / detekt / Android Lint / workflow-YAML
@@ -142,6 +148,13 @@ git config core.hooksPath .githooks
 
 - `app/**`, `build-logic/**`, `*.gradle.kts`, `gradle/**`, `gradle.properties`, `config/detekt/**`, `.github/actions/**` → `./gradlew test detektAll :app:lintDebug`
 - `.github/workflows/*.y?ml` → `python3 yaml.safe_load` on each changed file + `actionlint` when installed + `validate-release-security.py` when `release.yml` is staged
+
+The `actionlint` + `validate-release-security.py` gate is **also enforced
+server-side** by `workflow-lint.yml` (triggered on changes to
+`.github/workflows/**`, `.github/actions/**`, or the validator), so it no longer
+depends on the opt-in local hook. `validate-release-security.py` additionally
+rejects any `${{ … }}` interpolated directly into a Gradle step's `run:` (pass
+values via `env:` and reference shell variables instead).
 
 **Sandboxed environments without the Android SDK** (Claude Code on the web,
 ephemeral runners): `precommit.sh` detects a missing SDK and **skips only the

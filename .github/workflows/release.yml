@@ -303,9 +303,17 @@ jobs:
           echo "GOOGLE_PLAY_SERVICE_ACCOUNT_FILE=/tmp/gpp-sa.json" >> "$GITHUB_ENV"
 
       # -- Publish to Google Play Store ------------------------------------
+      # Dispatch inputs are passed via env and referenced as shell variables
+      # rather than interpolated directly into the run: string — the same safe
+      # pattern used for RELEASE_BODY above. This avoids a command-injection sink
+      # in the job that holds signing secrets, even if play_track/play_status are
+      # ever changed from `choice` to free-form `string` inputs.
       - name: Publish to Google Play via GPP
         if: steps.keystore.outputs.available == 'true' && steps.play-store.outputs.available == 'true'
-        run: ./gradlew :app:publishReleaseBundle -PplayTrack=${{ inputs.play_track || 'internal' }} -PplayStatus=${{ inputs.play_status || steps.play-status.outputs.status }}
+        env:
+          PLAY_TRACK: ${{ inputs.play_track || 'internal' }}
+          PLAY_STATUS: ${{ inputs.play_status || steps.play-status.outputs.status }}
+        run: ./gradlew :app:publishReleaseBundle -PplayTrack="$PLAY_TRACK" -PplayStatus="$PLAY_STATUS"
 
       - name: Upload release artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

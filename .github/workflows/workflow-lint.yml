@@ -1,0 +1,53 @@
+name: Workflow Lint
+
+# Enforces the workflow/release security gate server-side. Previously
+# actionlint and validate-release-security.py ran only in the opt-in local
+# pre-commit hook, so a contributor who never enabled the hook (or used
+# --no-verify) could merge a workflow change that leaked signing secrets with
+# nothing in CI catching it. This job makes the gate mandatory on every PR that
+# touches workflows, composite actions, or the security validator itself.
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+      - 'scripts/validate-release-security.py'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+      - 'scripts/validate-release-security.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint workflows
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      # Install actionlint at a pinned version. `go install` resolves the module
+      # through the Go checksum database (sum.golang.org), so the binary's
+      # integrity is verified without a hand-maintained SHA. ubuntu-latest ships
+      # both Go and shellcheck, so actionlint's embedded shell checks run too.
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: v1.7.7
+        run: go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+
+      - name: Run actionlint
+        run: |
+          "$(go env GOPATH)/bin/actionlint" -color
+
+      # Server-side enforcement of the release signing-secret hygiene rules.
+      - name: Validate release workflow security
+        run: python3 scripts/validate-release-security.py
