@@ -85,8 +85,26 @@ fun CompassDuelNavGraph(navController: NavHostController) {
     LaunchedEffect(appViewModel) {
         appViewModel.sessionEvents.collect { event ->
             when (event) {
-                SessionEvent.RoundStarted -> navController.navigate(GameRoute)
-                SessionEvent.MatchOver -> navController.navigate(ResultsRoute)
+                SessionEvent.RoundStarted -> {
+                    // launchSingleTop reuses an existing GameRoute entry rather than
+                    // pushing a duplicate — per-round RoundStarted events will not
+                    // accumulate extra back-stack entries (#67).
+                    // popUpTo(GameRoute) inclusive ensures any stale GameRoute
+                    // beneath is replaced, keeping the stack tidy in best-of-3
+                    // scenarios.
+                    navController.navigate(GameRoute) {
+                        popUpTo<GameRoute> { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
+                SessionEvent.MatchOver -> {
+                    // Pop any existing ResultsRoute before navigating so that a
+                    // replayed event (replay=1, #63) doesn't push a second copy.
+                    navController.navigate(ResultsRoute) {
+                        popUpTo<ResultsRoute> { inclusive = true }
+                        launchSingleTop = true
+                    }
+                }
                 SessionEvent.RematchRequested -> {
                     // Pop Game (and Results if present) back to Lobby so the
                     // same players can adjust seats/picks before the next round.

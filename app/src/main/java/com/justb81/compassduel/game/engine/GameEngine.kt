@@ -12,6 +12,7 @@ import com.justb81.compassduel.net.protocol.PlayerAction
 import com.justb81.compassduel.net.protocol.PlayerSnapshot
 import com.justb81.compassduel.net.protocol.PlayerStatus
 import com.justb81.compassduel.net.protocol.RoundPhase
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -268,6 +269,24 @@ open class GameEngine(
     /** Live stream of authoritative game state, updated every tick. */
     val snapshots: StateFlow<GameSnapshot> = _snapshots
 
+    /**
+     * Completes exactly once when the round transitions to [RoundPhase.ROUND_OVER].
+     *
+     * The session awaits this deferred to trigger [computeAndBroadcastRoundEnd] even
+     * when the tick loop is cancelled at the round-over boundary (issue #66).
+     * A new deferred is created by each [startRound] call.
+     */
+    private var _roundOverSignal: CompletableDeferred<Unit> = CompletableDeferred()
+
+    /**
+     * A terminal signal that completes when the engine's round enters [RoundPhase.ROUND_OVER].
+     * Awaiting this deferred is race-free: it completes atomically inside the tick loop
+     * before the snapshot is emitted, so the session always receives the signal even when
+     * [stop] is called at the same boundary.
+     */
+    val roundOverSignal: CompletableDeferred<Unit>
+        get() = _roundOverSignal
+
     private var engineState: EngineState? = null
     private var setup: List<EnginePlayerSetup> = emptyList()
     private var roundIndex: Int = 0
@@ -296,6 +315,9 @@ open class GameEngine(
             continuousInputs.clear()
             queuedActions.clear()
         }
+
+        // Reset the round-over signal so the new round has a fresh, uncompleted deferred.
+        _roundOverSignal = CompletableDeferred()
 
         setup = playerSetup
         this.roundIndex = roundIndex
@@ -394,14 +416,14 @@ open class GameEngine(
         val tickResult: TickResult = when (currentPhase) {
             RoundPhase.PLAYING -> {
                 if (rules.isRoundOver(state, elapsed)) {
-                    currentPhase = RoundPhase.ROUND_OVER
+                    transitionToRoundOver()
                     TickResult(state, emptyList(), emptyMap())
                 } else {
                     val result = rules.onTick(state, inputs, now, setup)
                     engineState = result.state
                     // Check for round-over caused by the tick (e.g. survivor elimination)
                     if (rules.isRoundOver(result.state, elapsed)) {
-                        currentPhase = RoundPhase.ROUND_OVER
+                        transitionToRoundOver()
                     }
                     result
                 }
@@ -465,6 +487,18 @@ open class GameEngine(
     // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
+
+    /**
+     * Transitions to [RoundPhase.ROUND_OVER] and completes [roundOverSignal].
+     *
+     * The signal completion happens *before* the snapshot is emitted so the session
+     * observer is guaranteed to see ROUND_OVER even if the tick loop is cancelled
+     * between this call and the [_snapshots] update (issue #66).
+     */
+    private fun transitionToRoundOver() {
+        currentPhase = RoundPhase.ROUND_OVER
+        _roundOverSignal.complete(Unit)
+    }
 
     private fun computePhase(nowMillis: Long): RoundPhase {
         if (currentPhase == RoundPhase.ROUND_OVER) return RoundPhase.ROUND_OVER

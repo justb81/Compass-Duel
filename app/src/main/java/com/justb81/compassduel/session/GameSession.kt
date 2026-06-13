@@ -118,7 +118,13 @@ class GameSession @Inject constructor(
     /** Round-end result, or null while the round is in progress. */
     val roundEnd: StateFlow<NetMessage.RoundEnd?> = _roundEnd.asStateFlow()
 
-    private val _sessionEvents = MutableSharedFlow<SessionEvent>(extraBufferCapacity = SESSION_BUFFER)
+    // replay=1: a late or re-subscribing collector (e.g. after recomposition tears down
+    // LaunchedEffect) receives the most recent navigation event so navigation is never
+    // permanently stranded by a dropped event (#63).
+    private val _sessionEvents = MutableSharedFlow<SessionEvent>(
+        replay = 1,
+        extraBufferCapacity = SESSION_BUFFER,
+    )
 
     /** Navigation-level events that drive screen transitions. */
     val sessionEvents: SharedFlow<SessionEvent> = _sessionEvents.asSharedFlow()
@@ -148,6 +154,18 @@ class GameSession @Inject constructor(
     private var snapshotJob: Job? = null
     private var messageJob: Job? = null
     private var connectionJob: Job? = null
+    /**
+     * Tracks the coroutine that awaits [GameEngine.roundOverSignal] so it can be
+     * cancelled on reset/rematch, preventing a dangling await on a never-completing
+     * deferred when the engine is stopped mid-round (e.g. disconnect, #66).
+     */
+    private var roundOverWaitJob: Job? = null
+    /**
+     * Tracks the coroutine launched by [computeAndBroadcastRoundEnd] that waits for
+     * [ROUND_END_DELAY_MILLIS] (and possibly [NEXT_ROUND_DELAY_MILLIS]) before advancing
+     * the match. Stored so it can be cancelled on reset/rematch (#62).
+     */
+    private var roundAdvanceJob: Job? = null
     private var roundIndex: Int = 0
     private var matchScore: MatchScore = MatchScore()
     private var matchInProgress: Boolean = false
@@ -221,6 +239,14 @@ class GameSession @Inject constructor(
      * and emits [SessionEvent.RematchRequested].
      */
     fun requestRematch() {
+        // Cancel any pending round-advance coroutine before resetting match state (#62).
+        roundAdvanceJob?.cancel()
+        roundAdvanceJob = null
+        // Cancel the roundOverSignal awaiter so a late-completing signal cannot
+        // trigger a spurious computeAndBroadcastRoundEnd after the rematch resets
+        // all state (#66 / #62).
+        roundOverWaitJob?.cancel()
+        roundOverWaitJob = null
         transport.broadcast(NetMessage.Rematch)
         val currentLobby = _lobby.value ?: return
         transport.acceptNewConnections = true
@@ -465,6 +491,9 @@ class GameSession @Inject constructor(
         when (message) {
             is NetMessage.LobbyState -> _lobby.value = message
             is NetMessage.RoundStart -> {
+                // Symmetric with the host: host clears _roundEnd before broadcasting
+                // RoundStart; client clears it here upon receipt — both roles see the
+                // same "no stale roundEnd during the new round" invariant (#68).
                 _roundEnd.value = null
                 _snapshot.value = null
                 _sessionEvents.tryEmit(SessionEvent.RoundStarted)
@@ -475,6 +504,9 @@ class GameSession @Inject constructor(
                 if (message.matchWinnerId != null || message.kidsAwards != null) {
                     _sessionEvents.tryEmit(SessionEvent.MatchOver)
                 }
+                // Non-final round: _roundEnd remains set (brief display window) until the
+                // next RoundStart arrives and clears it — matching the host's own display
+                // window (#68).
             }
             is NetMessage.Rematch -> {
                 _roundEnd.value = null
@@ -525,21 +557,31 @@ class GameSession @Inject constructor(
 
         snapshotJob?.cancel()
         snapshotJob = scope.launch {
-            var wasRoundOver = false
+            // Forward all snapshots to clients. Snapshot collection only; round-end
+            // computation is triggered by roundOverSignal below (#66).
             activeEngine.snapshots.collect { snap ->
                 _snapshot.value = snap
                 transport.broadcast(NetMessage.StateBroadcast(snap))
-
-                if (snap.phase == RoundPhase.ROUND_OVER && !wasRoundOver) {
-                    wasRoundOver = true
-                    computeAndBroadcastRoundEnd(mode)
-                }
             }
+        }
+
+        // Await the engine's terminal completion signal rather than observing a
+        // ROUND_OVER snapshot inside the tick loop. This is race-free: the signal
+        // is completed atomically inside transitionToRoundOver() before the snapshot
+        // is emitted, so even if the tick loop is cancelled at the boundary the
+        // round-end broadcast still fires (#66).
+        // The job is stored so reset()/requestRematch() can cancel it, preventing a
+        // dangling await when the engine is stopped mid-round (e.g. peer disconnect).
+        roundOverWaitJob?.cancel()
+        roundOverWaitJob = scope.launch {
+            activeEngine.roundOverSignal.await()
+            computeAndBroadcastRoundEnd(mode)
         }
     }
 
     private fun computeAndBroadcastRoundEnd(mode: GameMode) {
-        scope.launch {
+        // Store in roundAdvanceJob so reset() and requestRematch() can cancel it (#62).
+        roundAdvanceJob = scope.launch {
             delay(ROUND_END_DELAY_MILLIS)
 
             val roundEnd = buildRoundEnd(mode) ?: return@launch
@@ -553,6 +595,9 @@ class GameSession @Inject constructor(
                     } else {
                         delay(NEXT_ROUND_DELAY_MILLIS)
                         roundIndex++
+                        // Clear between-round results on both host and client at the same
+                        // lifecycle point (before RoundStart is broadcast) so both roles
+                        // display the same "stale roundEnd" window (#68).
                         _roundEnd.value = null
                         val currentLobby = _lobby.value ?: return@launch
                         startRoundInternal(currentLobby.mode, lobbyPlayers.toList())
@@ -638,6 +683,13 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun reset() {
+        // Cancel the round-advance coroutine first so it cannot race a new match (#62).
+        roundAdvanceJob?.cancel()
+        roundAdvanceJob = null
+        // Cancel the roundOverSignal awaiter so it cannot fire against a reset/rematched
+        // session when the engine was stopped mid-round (e.g. peer disconnect, #66).
+        roundOverWaitJob?.cancel()
+        roundOverWaitJob = null
         snapshotJob?.cancel()
         snapshotJob = null
         messageJob?.cancel()

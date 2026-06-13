@@ -139,6 +139,28 @@ private class StubEngine(
     override fun roundOutcome(): RoundOutcome = stubbedOutcome
 }
 
+/**
+ * [GameEngine] stand-in that exposes [triggerRoundOver] so tests can fire the
+ * [roundOverSignal] on demand, exercising the round-lifecycle wiring in [GameSession]
+ * without running a real tick loop.
+ *
+ * [roundOutcome] always returns [stubbedOutcome] regardless of internal phase state.
+ */
+private class ControllableEngine(
+    rules: ModeRuleSet,
+    clock: GameClock,
+    scope: CoroutineScope,
+    private val stubbedOutcome: RoundOutcome,
+) : GameEngine(rules, clock, scope) {
+
+    /** Completes the [roundOverSignal] deferred, simulating a legitimate ROUND_OVER. */
+    fun triggerRoundOver() {
+        roundOverSignal.complete(Unit)
+    }
+
+    override fun roundOutcome(): RoundOutcome = stubbedOutcome
+}
+
 class GameSessionTest {
 
     private val testDispatcher = StandardTestDispatcher()
@@ -915,10 +937,174 @@ class GameSessionTest {
     }
 
     // ---------------------------------------------------------------------------
+    // Round lifecycle — #62 roundAdvanceJob cancellation
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `reset cancels roundAdvanceJob so no spurious RoundStart is emitted after leave`() =
+        testScope.runTest {
+            var engineRef: ControllableEngine? = null
+            val stubbedOutcome = RoundOutcome.KidsOutcome(
+                stats = mapOf(1 to KidsRoundStats(playerId = 1, stars = 1, bubbleBlocks = 0, sparklesThrown = 0)),
+                awards = mapOf(1 to KidsAward.STAR_CHAMPION),
+            )
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    ControllableEngine(rules, clk, scp, stubbedOutcome).also { engineRef = it }
+                },
+            )
+
+            session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+            yield()
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+            session.chooseSeat(cell = 0)
+            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            yield()
+            session.chooseCharacter(spriteId = 0)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+            yield()
+
+            session.startMatch()
+            yield()
+
+            // Trigger ROUND_OVER to launch roundAdvanceJob (which waits ROUND_END_DELAY then
+            // tries to broadcast RoundEnd and emit MatchOver).
+            engineRef!!.triggerRoundOver()
+            yield()
+
+            // Record sent-messages count before leave.
+            val sentBefore = transport.sentMessages.size
+
+            // Leave resets the session — this must cancel roundAdvanceJob so it cannot
+            // complete and fire a spurious RoundEnd/MatchOver event (#62).
+            session.leave()
+            yield()
+
+            // Advance virtual time well past both delay thresholds so roundAdvanceJob
+            // would have fired if not cancelled.
+            delay(5_000L)
+
+            // No RoundEnd message should have been broadcast after leave().
+            val sentAfter = transport.sentMessages.drop(sentBefore)
+            assertTrue(sentAfter.none { it is NetMessage.RoundEnd }) {
+                "roundAdvanceJob must be cancelled by reset() — spurious RoundEnd found"
+            }
+        }
+
+    @Test
+    fun `requestRematch cancels roundAdvanceJob so no spurious RoundStart is emitted`() =
+        testScope.runTest {
+            var engineRef: ControllableEngine? = null
+            val stubbedOutcome = RoundOutcome.StandardWinner(winnerId = null) // draw, non-final
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    ControllableEngine(rules, clk, scp, stubbedOutcome).also { engineRef = it }
+                },
+            )
+
+            session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+            yield()
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+            session.chooseSeat(cell = 0)
+            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            yield()
+            session.chooseCharacter(element = Element.FIRE)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(element = Element.WATER))
+            yield()
+
+            session.startMatch()
+            yield()
+
+            // Trigger ROUND_OVER — roundAdvanceJob will launch and wait for delays.
+            engineRef!!.triggerRoundOver()
+            yield()
+
+            // Capture RoundStart count before rematch (there is one from startMatch).
+            val roundStartsBefore = transport.sentMessages.count { it is NetMessage.RoundStart }
+
+            // Call requestRematch — this must cancel the in-flight roundAdvanceJob.
+            session.requestRematch()
+            yield()
+
+            // Advance past all delays — the cancelled roundAdvanceJob must NOT start a
+            // new round that would emit another RoundStart (#62).
+            delay(5_000L)
+
+            val roundStartsAfter = transport.sentMessages.count { it is NetMessage.RoundStart }
+            assertEquals(roundStartsBefore, roundStartsAfter) {
+                "requestRematch must cancel roundAdvanceJob — spurious RoundStart found"
+            }
+        }
+
+    // ---------------------------------------------------------------------------
+    // Round lifecycle — #68 client roundEnd cleared between rounds
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `client roundEnd is cleared on next RoundStart for non-final rounds`() =
+        testScope.runTest {
+            val session = buildSession()
+            session.joinLobby(playerName = "Bob")
+            yield()
+            session.connectTo("host-ep")
+            yield()
+            transport.emitConnection(ConnectionEvent.Connected("host-ep", "host-ep"))
+            yield()
+
+            // Simulate the host broadcasting a non-final RoundEnd (no matchWinnerId).
+            transport.emitIncoming(
+                "host-ep",
+                NetMessage.RoundEnd(
+                    roundWinnerId = 1,
+                    matchScore = mapOf(1 to 1, 2 to 0),
+                    matchWinnerId = null,
+                ),
+            )
+            yield()
+
+            // Client should have the non-final roundEnd set.
+            assertNotNull(session.roundEnd.value) {
+                "roundEnd should be set after receiving RoundEnd message"
+            }
+
+            // Now the host starts the next round.
+            transport.emitIncoming(
+                "host-ep",
+                NetMessage.RoundStart(
+                    mode = GameMode.STANDARD,
+                    roundIndex = 1,
+                    roundDurationSeconds = 90,
+                    players = emptyList(),
+                    facingCaptureSeconds = 3,
+                ),
+            )
+            yield()
+
+            // Client must clear roundEnd on RoundStart — symmetric with host (#68).
+            assertNull(session.roundEnd.value) {
+                "roundEnd must be null after RoundStart — stale between-round results (#68)"
+            }
+        }
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
 
     private fun assertTrue(condition: Boolean, lazyMessage: () -> String) {
         org.junit.jupiter.api.Assertions.assertTrue(condition, lazyMessage)
+    }
+
+    private fun assertNotNull(value: Any?, lazyMessage: () -> String) {
+        org.junit.jupiter.api.Assertions.assertNotNull(value, lazyMessage)
+    }
+
+    private fun assertNull(value: Any?, lazyMessage: () -> String) {
+        org.junit.jupiter.api.Assertions.assertNull(value, lazyMessage)
+    }
+
+    private fun assertEquals(expected: Any?, actual: Any?, lazyMessage: () -> String) {
+        org.junit.jupiter.api.Assertions.assertEquals(expected, actual, lazyMessage)
     }
 }
