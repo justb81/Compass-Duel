@@ -12,8 +12,11 @@
     <string name="home_player_name_label">Dein Name</string>
     <string name="home_mode_standard">Standard</string>
     <string name="home_mode_kids">Sternenfänger</string>
-    <string name="home_host_game">Spiel hosten</string>
-    <string name="home_join_game">Spiel beitreten</string>
+    <string name="home_create_game">Spiel erstellen</string>
+    <string name="home_nearby_header">Spiele in der Nähe</string>
+    <string name="home_searching">Suche nach Spielen in der Nähe …</string>
+    <string name="home_no_games_found">Noch keine Spiele. Erstelle ein eigenes oder warte auf einen Host in der Nähe.</string>
+    <string name="home_join_button">Beitreten</string>
 
     <!-- Crash report dialog (shown on next launch after an uncaught exception) -->
     <string name="crash_dialog_title">Die App wurde unerwartet beendet</string>
@@ -35,6 +38,14 @@
     <string name="lobby_start_button">Spiel starten</string>
     <string name="lobby_waiting_for_host">Warte auf den Host …</string>
 
+    <!-- Lobby — Validierungsfehler beim Spielstart -->
+    <string name="lobby_start_error_no_lobby">Start nicht möglich — keine Lobby.</string>
+    <string name="lobby_start_error_too_few">Mindestens 2 Spieler zum Starten nötig.</string>
+    <string name="lobby_start_error_too_many">Zu viele Spieler (max. 4).</string>
+    <string name="lobby_start_error_not_greeted">Alle müssen sich zuerst begrüßen.</string>
+    <string name="lobby_start_error_missing_elements">Alle müssen ein Element wählen.</string>
+    <string name="lobby_start_error_duplicate_elements">Jeder Spieler braucht ein anderes Element.</string>
+
     <!-- Lobby — Begrüßung -->
     <string name="lobby_greet_header">Begrüße deine Gegner</string>
     <string name="lobby_greet_hint">Begrüße alle am Tisch: Tippe einen Spieler an, richte dein Handy auf ihn und verbeuge dich (nach vorne kippen und zurück). Er verbeugt sich zurück. So lernt das Spiel, wo du sitzt.</string>
@@ -53,10 +64,8 @@
     <string name="lobby_error_discovery_failed">Suche nach Hosts fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind.</string>
     <string name="lobby_error_connect_failed">Verbindung zum Host fehlgeschlagen. Bitte versuche es erneut.</string>
 
-    <!-- Lobby — client discovery -->
-    <string name="lobby_searching">Suche nach Hosts in der Nähe …</string>
-    <string name="lobby_no_hosts_found">Noch kein Host gefunden. Stelle sicher, dass der Host ein Spiel gestartet hat.</string>
-    <string name="lobby_connect_button">Verbinden</string>
+    <!-- Lobby — Verbindungsaufbau (Client) -->
+    <string name="lobby_connecting">Verbinde mit Host …</string>
 
     <!-- Element picker (Standard mode) -->
     <string name="element_fire">Feuer</string>

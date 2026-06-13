@@ -32,11 +32,14 @@ Hero, Busy Bee, or Super Sparkler).
 ## Match Flow
 
 ```
-Host / Join → Lobby (bow-to-greet handshake + element/sprite pick) →
+Home (browse nearby games → join or create) →
+Lobby (bow-to-greet handshake + element/sprite pick) →
 3 s get-ready countdown → Round → Results / Rematch
 ```
 
-1. One device hosts; others discover it automatically via BLE and join.
+1. On launch the home screen browses for nearby games over BLE: join one directly,
+   or create (host) your own. The hosting device advertises; everyone else discovers
+   it automatically.
 2. In the lobby each player greets every opponent: aim at them and bow (tilt the
    phone forward and back); they bow back to accept. This captures the relative
    bearings — no manual seat grid and no aim calibration. Then pick a character.

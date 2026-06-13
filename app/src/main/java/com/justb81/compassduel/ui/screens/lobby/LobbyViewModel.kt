@@ -9,13 +9,13 @@ import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.gesture.BowDetector
 import com.justb81.compassduel.game.gesture.BowSample
 import com.justb81.compassduel.haptics.HapticFeedback
-import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.sensor.OrientationSample
 import com.justb81.compassduel.sensor.OrientationSensor
 import com.justb81.compassduel.session.GameSession
+import com.justb81.compassduel.session.StartResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -56,12 +56,10 @@ data class LobbyUiState(
     val mode: GameMode = GameMode.STANDARD,
     /** The local player's id (assigned by the host; 0 = not yet known). */
     val myPlayerId: Int = 0,
-    /** Endpoints discovered while the client is searching (before connecting). */
-    val discoveredEndpoints: List<DiscoveredEndpoint> = emptyList(),
-    /** True while the client is discovering and has not yet received a LobbyState. */
-    val isSearching: Boolean = false,
-    /** Validation error to surface via Snackbar (host only; null = no error). */
-    val startError: String? = null,
+    /** True while the client has committed to a host but not yet received a LobbyState. */
+    val isConnecting: Boolean = false,
+    /** String resource for a start-match validation error (host only; null = no error). */
+    @StringRes val startErrorRes: Int? = null,
     /** String resource for a transport failure to surface via Snackbar (null = no error). */
     @StringRes val transportErrorRes: Int? = null,
     /** Opponents the local player can greet, with reciprocal greeting status. */
@@ -73,8 +71,8 @@ data class LobbyUiState(
 /**
  * ViewModel for the lobby screen.
  *
- * Derives its state from [GameSession.lobby] and [GameSession.discoveredEndpoints]
- * so that host and client see a consistent picture of the lobby.
+ * Derives its state from [GameSession.lobby] so that host and client see a consistent
+ * picture of the lobby. Host discovery happens on the home screen, not here.
  *
  * ### Greeting handshake
  * To establish their relative positions, players bow at each opponent: the player arms a
@@ -95,7 +93,7 @@ class LobbyViewModel @Inject constructor(
     private val haptics: HapticFeedback,
 ) : ViewModel() {
 
-    private val _startError = MutableStateFlow<String?>(null)
+    private val _startErrorRes = MutableStateFlow<Int?>(null)
     private val _transportErrorRes = MutableStateFlow<Int?>(null)
     private val _armedTargetId = MutableStateFlow<Int?>(null)
     private val _bowFeedback = MutableStateFlow<BowFeedback?>(null)
@@ -155,28 +153,25 @@ class LobbyViewModel @Inject constructor(
     /** Combined UI state observed by [LobbyScreen]. */
     val uiState: StateFlow<LobbyUiState> = combine(
         session.lobby,
-        session.discoveredEndpoints,
-        _startError,
+        _startErrorRes,
         _transportErrorRes,
         _armedTargetId,
-    ) { lobby, endpoints, startError, transportErrorRes, armedTargetId ->
+    ) { lobby, startErrorRes, transportErrorRes, armedTargetId ->
         if (lobby != null) {
             LobbyUiState(
                 players = lobby.players,
                 mode = lobby.mode,
                 myPlayerId = lobby.yourPlayerId,
-                discoveredEndpoints = emptyList(),
-                isSearching = false,
-                startError = startError,
+                isConnecting = false,
+                startErrorRes = startErrorRes,
                 transportErrorRes = transportErrorRes,
                 greetingTargets = buildGreetingTargets(lobby.players, lobby.yourPlayerId),
                 armedTargetId = armedTargetId,
             )
         } else {
             LobbyUiState(
-                discoveredEndpoints = endpoints,
-                isSearching = true,
-                startError = startError,
+                isConnecting = true,
+                startErrorRes = startErrorRes,
                 transportErrorRes = transportErrorRes,
             )
         }
@@ -236,31 +231,25 @@ class LobbyViewModel @Inject constructor(
     }
 
     /**
-     * Requests a connection to a discovered host (client only).
-     *
-     * @param endpointId The endpoint to connect to.
-     */
-    fun connectTo(endpointId: String) {
-        session.connectTo(endpointId)
-    }
-
-    /**
      * Attempts to start the match (host only).
      *
-     * Validation errors are surfaced via [LobbyUiState.startError].
+     * Validation failures are surfaced via [LobbyUiState.startErrorRes].
      */
     fun startMatch() {
-        try {
-            session.startMatch()
-            _startError.value = null
-        } catch (e: IllegalStateException) {
-            _startError.value = e.message
+        _startErrorRes.value = when (session.startMatch()) {
+            StartResult.Success -> null
+            StartResult.NoLobby -> R.string.lobby_start_error_no_lobby
+            StartResult.TooFewPlayers -> R.string.lobby_start_error_too_few
+            StartResult.TooManyPlayers -> R.string.lobby_start_error_too_many
+            StartResult.NotAllGreeted -> R.string.lobby_start_error_not_greeted
+            StartResult.MissingElements -> R.string.lobby_start_error_missing_elements
+            StartResult.DuplicateElements -> R.string.lobby_start_error_duplicate_elements
         }
     }
 
     /** Clears the start-error message (e.g. after the Snackbar is dismissed). */
     fun clearStartError() {
-        _startError.value = null
+        _startErrorRes.value = null
     }
 
     /** Clears the transport-error message (e.g. after the Snackbar is shown). */

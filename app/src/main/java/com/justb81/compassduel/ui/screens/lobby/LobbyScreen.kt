@@ -4,7 +4,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -45,7 +44,6 @@ import com.justb81.compassduel.R
 import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.game.gesture.BowDetector
 import com.justb81.compassduel.game.gesture.BowThresholds
-import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.ui.components.PlayerBadge
@@ -81,9 +79,9 @@ private const val SPRITE_COUNT = 4
  * validation would pass (2–4 players, all seated with unique cells, all picked).
  *
  * ### Client flow
- * Before connecting: shows the list of discovered host endpoints with Connect
- * buttons and a "Searching…" indicator.
- * After [LobbyUiState.isSearching] becomes false (LobbyState received): shows
+ * Before the host's first LobbyState arrives: shows a "Connecting…" indicator
+ * (host discovery happens on the home screen now).
+ * After [LobbyUiState.isConnecting] becomes false (LobbyState received): shows
  * the same seat/pick UI as the host and a "Waiting for host to start" label.
  *
  * Kids Mode variant uses oversized touch targets and pastel sprite buttons per
@@ -102,10 +100,11 @@ fun LobbyScreen(
     val bowFeedback by viewModel.bowFeedback.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(uiState.startError) {
-        val error = uiState.startError
-        if (error != null) {
-            snackbarHostState.showSnackbar(error)
+    val startErrorRes = uiState.startErrorRes
+    val startErrorMessage = startErrorRes?.let { stringResource(it) }
+    LaunchedEffect(startErrorRes) {
+        if (startErrorMessage != null) {
+            snackbarHostState.showSnackbar(startErrorMessage)
             viewModel.clearStartError()
         }
     }
@@ -140,10 +139,8 @@ fun LobbyScreen(
         },
     ) { innerPadding ->
         when {
-            !isHost && uiState.isSearching -> {
-                ClientDiscoveryContent(
-                    endpoints = uiState.discoveredEndpoints,
-                    onConnectTo = viewModel::connectTo,
+            !isHost && uiState.isConnecting -> {
+                ConnectingContent(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(innerPadding)
@@ -170,10 +167,12 @@ fun LobbyScreen(
     }
 }
 
+/**
+ * Shown to a client after it has committed to a host on the home screen but before the
+ * host's first LobbyState arrives.
+ */
 @Composable
-private fun ClientDiscoveryContent(
-    endpoints: List<DiscoveredEndpoint>,
-    onConnectTo: (String) -> Unit,
+private fun ConnectingContent(
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -183,38 +182,9 @@ private fun ClientDiscoveryContent(
     ) {
         CircularProgressIndicator(modifier = Modifier.size(PROGRESS_INDICATOR_SIZE_DP))
         Text(
-            text = stringResource(R.string.lobby_searching),
+            text = stringResource(R.string.lobby_connecting),
             style = MaterialTheme.typography.bodyLarge,
         )
-
-        if (endpoints.isEmpty()) {
-            Text(
-                text = stringResource(R.string.lobby_no_hosts_found),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        } else {
-            endpoints.forEach { endpoint ->
-                DiscoveredHostRow(endpoint = endpoint, onConnect = { onConnectTo(endpoint.endpointId) })
-            }
-        }
-    }
-}
-
-@Composable
-private fun DiscoveredHostRow(
-    endpoint: DiscoveredEndpoint,
-    onConnect: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    OutlinedButton(
-        onClick = onConnect,
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = SCREEN_PADDING_DP, vertical = ITEM_SPACING_DP),
-    ) {
-        Text(text = endpoint.name)
-        Spacer(modifier = Modifier.weight(1f))
-        Text(text = stringResource(R.string.lobby_connect_button))
     }
 }
 

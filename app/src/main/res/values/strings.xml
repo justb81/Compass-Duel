@@ -12,8 +12,11 @@
     <string name="home_player_name_label">Your name</string>
     <string name="home_mode_standard">Standard</string>
     <string name="home_mode_kids">Star Catchers</string>
-    <string name="home_host_game">Host game</string>
-    <string name="home_join_game">Join game</string>
+    <string name="home_create_game">Create game</string>
+    <string name="home_nearby_header">Nearby games</string>
+    <string name="home_searching">Searching for nearby games…</string>
+    <string name="home_no_games_found">No games yet. Create your own, or wait for a host nearby.</string>
+    <string name="home_join_button">Join</string>
 
     <!-- Crash report dialog (shown on next launch after an uncaught exception) -->
     <string name="crash_dialog_title">The app closed unexpectedly</string>
@@ -35,6 +38,14 @@
     <string name="lobby_start_button">Start game</string>
     <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
 
+    <!-- Lobby — start-match validation errors -->
+    <string name="lobby_start_error_no_lobby">Couldn\'t start — no lobby.</string>
+    <string name="lobby_start_error_too_few">Need at least 2 players to start.</string>
+    <string name="lobby_start_error_too_many">Too many players (max 4).</string>
+    <string name="lobby_start_error_not_greeted">Everyone must greet each other first.</string>
+    <string name="lobby_start_error_missing_elements">Everyone must choose an element.</string>
+    <string name="lobby_start_error_duplicate_elements">Each player needs a different element.</string>
+
     <!-- Lobby — greeting handshake -->
     <string name="lobby_greet_header">Greet your opponents</string>
     <string name="lobby_greet_hint">Greet everyone at the table: tap a player, point your phone at them and bow (tilt it forward and back). They bow back to accept. This is how the game learns where you are sitting.</string>
@@ -53,10 +64,8 @@
     <string name="lobby_error_discovery_failed">Couldn\'t search for hosts. Make sure Bluetooth and Wi-Fi are on.</string>
     <string name="lobby_error_connect_failed">Couldn\'t connect to the host. Please try again.</string>
 
-    <!-- Lobby — client discovery -->
-    <string name="lobby_searching">Searching for nearby hosts…</string>
-    <string name="lobby_no_hosts_found">No hosts found yet. Make sure the host has started a game.</string>
-    <string name="lobby_connect_button">Connect</string>
+    <!-- Lobby — client connecting -->
+    <string name="lobby_connecting">Connecting to host…</string>
 
     <!-- Element picker (Standard mode) -->
     <string name="element_fire">Fire</string>
