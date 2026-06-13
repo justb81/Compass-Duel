@@ -1,41 +1,64 @@
 package com.justb81.compassduel.ui.screens.game
 
+import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justb81.compassduel.BuildConfig
 import com.justb81.compassduel.R
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.PlayerStatus
+import com.justb81.compassduel.ui.components.ActionEffectOverlay
 import com.justb81.compassduel.ui.components.CompassRing
 
 private val SCREEN_PADDING_DP = 16.dp
 private val SECTION_SPACING_DP = 8.dp
 private val CHIP_SPACING_DP = 4.dp
 private const val ELIMINATED_OVERLAY_ALPHA = 0.6f
+private const val HELP_SCRIM_ALPHA = 0.7f
 private const val HP_MAX = 100f
 private const val MILLIS_PER_SECOND = 1_000L
 private val WARNING_COLOR_KIDS = Color(0xFFFFEB3B)
 private val HIGHLIGHT_COLOR = Color(0xFF4CAF50)
+private val HELP_CARD_MAX_WIDTH_DP = 360.dp
+private val HELP_CARD_PADDING_DP = 20.dp
+
+// Mirrors CompassRing's aspect ratio so the effect overlay shares its geometry.
+private const val COMPASS_ASPECT_RATIO = 1f
 
 /**
  * Game screen — renders COUNTDOWN, PLAYING and ROUND_OVER phases.
@@ -51,11 +74,165 @@ fun GameScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    KeepScreenOnAndImmersive()
+
+    // Help overlay visibility is screen-local and default-collapsed; it is
+    // toggled by the "?" affordance and dismissed by tapping the scrim.
+    var helpVisible by remember { mutableStateOf(false) }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (val state = uiState) {
             is GameUiState.Countdown -> CountdownContent(state)
             is GameUiState.Playing -> PlayingContent(state)
             GameUiState.RoundOver -> RoundOverContent()
+        }
+
+        // The how-to-play overlay is offered during the COUNTDOWN and PLAYING
+        // phases only; its content branches on the active game mode.
+        val helpMode: GameMode? = when (val state = uiState) {
+            is GameUiState.Countdown -> state.mode
+            is GameUiState.Playing -> state.mode
+            GameUiState.RoundOver -> null
+        }
+        if (helpMode != null) {
+            HelpAffordance(
+                expanded = helpVisible,
+                onToggle = { helpVisible = !helpVisible },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(SCREEN_PADDING_DP),
+            )
+            if (helpVisible) {
+                HelpOverlay(
+                    mode = helpMode,
+                    onDismiss = { helpVisible = false },
+                )
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// How-to-play overlay
+// -------------------------------------------------------------------------
+
+/**
+ * Small "?" icon button that toggles the [HelpOverlay]. Placed in the top-end
+ * corner so it stays clear of the [CompassRing].
+ */
+@Composable
+private fun HelpAffordance(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val description = stringResource(if (expanded) R.string.game_help_close else R.string.game_help_open)
+    // material-icons-extended is intentionally not a dependency, so use a "?" glyph
+    // (matching the emoji-marker convention used on the home and lobby screens).
+    FilledTonalIconButton(
+        onClick = onToggle,
+        modifier = modifier.semantics { contentDescription = description },
+    ) {
+        Text(text = "?", style = MaterialTheme.typography.titleLarge)
+    }
+}
+
+/**
+ * Translucent scrim + card summarizing the controls. Tapping anywhere on the
+ * scrim (or the affordance again) dismisses it. Content branches on [mode] so
+ * Kids Mode never shows combat wording.
+ */
+@Composable
+private fun HelpOverlay(
+    mode: GameMode,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = HELP_SCRIM_ALPHA))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(
+            modifier = Modifier
+                .padding(SCREEN_PADDING_DP)
+                .widthIn(max = HELP_CARD_MAX_WIDTH_DP),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(HELP_CARD_PADDING_DP),
+                verticalArrangement = Arrangement.spacedBy(SECTION_SPACING_DP),
+            ) {
+                val titleRes = when (mode) {
+                    GameMode.STANDARD -> R.string.game_help_title_standard
+                    GameMode.KIDS -> R.string.game_help_title_kids
+                }
+                Text(
+                    text = stringResource(titleRes),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                val lineResources = when (mode) {
+                    GameMode.STANDARD -> listOf(
+                        R.string.game_help_aim_standard,
+                        R.string.game_help_attack_standard,
+                        R.string.game_help_shield_standard,
+                        R.string.game_help_dodge_standard,
+                    )
+                    GameMode.KIDS -> listOf(
+                        R.string.game_help_aim_kids,
+                        R.string.game_help_toss_kids,
+                        R.string.game_help_bubble_kids,
+                        R.string.game_help_rest_kids,
+                    )
+                }
+                lineResources.forEach { lineRes ->
+                    Text(
+                        text = stringResource(lineRes),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.game_help_dismiss_hint),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = SECTION_SPACING_DP),
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Side effect tied to the [GameScreen] lifecycle: keeps the screen awake and
+ * enters immersive full-screen (status + navigation bars hidden) for the whole
+ * time the game screen is shown, then reverses both on dispose.
+ *
+ * Disposal fires whenever the [GameRoute] composable leaves the back stack —
+ * navigating to results/lobby, back navigation, or a peer-lost teardown — so
+ * the screen never stays awake or full-screen indefinitely.
+ */
+@Composable
+private fun KeepScreenOnAndImmersive() {
+    val activity = LocalActivity.current ?: return
+
+    DisposableEffect(activity) {
+        val window = activity.window
+        val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        insetsController.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController.hide(WindowInsetsCompat.Type.systemBars())
+
+        onDispose {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 }
@@ -112,20 +289,35 @@ private fun PlayingContent(state: GameUiState.Playing) {
                 GameMode.KIDS -> KidsHud(state)
             }
 
-            // Compass ring — ring rotates with local sensor at full rate
+            // Compass ring — ring rotates with local sensor at full rate.
+            // The action-effect overlay is layered directly on top of the ring
+            // and shares its geometry so projectiles/impacts land on the reticle.
             val warningColor = if (state.mode == GameMode.STANDARD) {
                 Color.Red
             } else {
                 WARNING_COLOR_KIDS
             }
-            CompassRing(
-                currentAzimuthDegrees = state.azimuthDegrees,
-                targets = state.compassTargets,
-                isTargeted = state.warningActive,
-                warningColor = warningColor,
-                highlightColor = HIGHLIGHT_COLOR,
+            Box(
                 modifier = Modifier.weight(1f),
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                CompassRing(
+                    currentAzimuthDegrees = state.azimuthDegrees,
+                    targets = state.compassTargets,
+                    isTargeted = state.warningActive,
+                    warningColor = warningColor,
+                    highlightColor = HIGHLIGHT_COLOR,
+                )
+                ActionEffectOverlay(
+                    effect = state.actionEffect,
+                    mode = state.mode,
+                    shielding = state.shielding,
+                    dodging = state.dodging,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(COMPASS_ASPECT_RATIO),
+                )
+            }
 
             // Bottom status line
             StatusLine(state)

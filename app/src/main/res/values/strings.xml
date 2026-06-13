@@ -36,6 +36,13 @@
     <string name="lobby_start_button">Start game</string>
     <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
 
+    <!-- Lobby — aim calibration -->
+    <string name="lobby_calibrate_header">Calibrate your aim</string>
+    <string name="lobby_calibrate_hint">Point your phone straight ahead at the play area, then tap to set your forward direction. You can do this now while everyone is ready — no rush once the round starts.</string>
+    <string name="lobby_calibrate_button">Point forward &amp; calibrate</string>
+    <string name="lobby_recalibrate_button">Calibrate again</string>
+    <string name="lobby_calibrated_label">✓ Aim calibrated</string>
+
     <!-- Lobby — transport errors -->
     <string name="lobby_error_host_failed">Couldn\'t start hosting. Make sure Bluetooth and Wi-Fi are on, then try again.</string>
     <string name="lobby_error_discovery_failed">Couldn\'t search for hosts. Make sure Bluetooth and Wi-Fi are on.</string>
@@ -76,6 +83,21 @@
     <string name="game_status_ready">Ready</string>
     <string name="game_eliminated_spectating">You have been eliminated.\nWatch the remaining players.</string>
     <string name="game_timer_label">%1$ds</string>
+
+    <!-- In-game how-to-play overlay -->
+    <string name="game_help_open">How to play</string>
+    <string name="game_help_close">Close help</string>
+    <string name="game_help_title_standard">How to play</string>
+    <string name="game_help_aim_standard">Aim: point your phone at an opponent on the compass ring.</string>
+    <string name="game_help_attack_standard">Attack: tilt the phone forward and shake.</string>
+    <string name="game_help_shield_standard">Shield: hold the phone flat to block incoming attacks.</string>
+    <string name="game_help_dodge_standard">Dodge: quickly tilt the phone the opposite way.</string>
+    <string name="game_help_title_kids">How to play</string>
+    <string name="game_help_aim_kids">Aim: point your phone at a friend on the ring — the cone is nice and wide.</string>
+    <string name="game_help_toss_kids">Toss a sparkle: tilt your phone forward and give it a little wiggle.</string>
+    <string name="game_help_bubble_kids">Magic bubble: hold your phone flat to make a bubble and earn a star.</string>
+    <string name="game_help_rest_kids">Rest: after you are caught you take a short rest, then you are back!</string>
+    <string name="game_help_dismiss_hint">Tap anywhere to close</string>
 
     <!-- Results screen -->
     <string name="results_title">Round Results</string>

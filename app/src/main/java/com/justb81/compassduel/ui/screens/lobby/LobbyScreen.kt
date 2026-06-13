@@ -154,6 +154,7 @@ fun LobbyScreen(
                     onChooseSeat = viewModel::chooseSeat,
                     onChooseElement = viewModel::chooseElement,
                     onChooseSprite = viewModel::chooseSprite,
+                    onCalibrate = viewModel::calibrateAim,
                     onStartMatch = viewModel::startMatch,
                     modifier = Modifier
                         .fillMaxSize()
@@ -213,6 +214,7 @@ private fun DiscoveredHostRow(
 }
 
 @OptIn(ExperimentalLayoutApi::class)
+@Suppress("LongParameterList")
 @Composable
 private fun LobbyContent(
     uiState: LobbyUiState,
@@ -221,6 +223,7 @@ private fun LobbyContent(
     onChooseSeat: (Int) -> Unit,
     onChooseElement: (Element) -> Unit,
     onChooseSprite: (Int) -> Unit,
+    onCalibrate: () -> Unit,
     onStartMatch: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -283,6 +286,13 @@ private fun LobbyContent(
             }
         }
 
+        // ---- Aim calibration ----
+        SectionHeader(text = stringResource(R.string.lobby_calibrate_header))
+        CalibrationSection(
+            isCalibrated = uiState.isCalibrated,
+            onCalibrate = onCalibrate,
+        )
+
         // ---- Start / wait ----
         Spacer(modifier = Modifier.height(ITEM_SPACING_DP))
         LobbyActionRow(
@@ -313,6 +323,53 @@ private fun LobbyActionRow(
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * In-lobby aim calibration. Players point the phone forward at the play area and tap to
+ * record their forward heading before the match starts, so the round no longer depends on a
+ * single buzzer-time capture. Especially helpful in Kids Mode, where children should not be
+ * rushed at round start.
+ *
+ * The captured offset is held locally in
+ * [com.justb81.compassduel.sensor.AimCalibrationStore] and never sent over the network.
+ */
+@Composable
+private fun CalibrationSection(
+    isCalibrated: Boolean,
+    onCalibrate: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(BADGE_SPACING_DP),
+    ) {
+        Text(
+            text = stringResource(R.string.lobby_calibrate_hint),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        if (isCalibrated) {
+            Text(
+                text = stringResource(R.string.lobby_calibrated_label),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            OutlinedButton(
+                onClick = onCalibrate,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(text = stringResource(R.string.lobby_recalibrate_button))
+            }
+        } else {
+            Button(
+                onClick = onCalibrate,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(text = stringResource(R.string.lobby_calibrate_button))
+            }
+        }
     }
 }
 

@@ -36,6 +36,13 @@
     <string name="lobby_start_button">Spiel starten</string>
     <string name="lobby_waiting_for_host">Warte auf den Host …</string>
 
+    <!-- Lobby — aim calibration -->
+    <string name="lobby_calibrate_header">Zielrichtung kalibrieren</string>
+    <string name="lobby_calibrate_hint">Richte dein Handy gerade auf das Spielfeld und tippe, um deine Vorwärtsrichtung festzulegen. Du kannst das jetzt in Ruhe machen, solange alle bereit sind — beim Rundenstart bleibt dann keine Hektik.</string>
+    <string name="lobby_calibrate_button">Nach vorne richten &amp; kalibrieren</string>
+    <string name="lobby_recalibrate_button">Erneut kalibrieren</string>
+    <string name="lobby_calibrated_label">✓ Zielrichtung kalibriert</string>
+
     <!-- Lobby — transport errors -->
     <string name="lobby_error_host_failed">Hosten fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind, und versuche es erneut.</string>
     <string name="lobby_error_discovery_failed">Suche nach Hosts fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind.</string>
@@ -76,6 +83,21 @@
     <string name="game_status_ready">Bereit</string>
     <string name="game_eliminated_spectating">Du wurdest ausgeschieden.\nBeobachte die verbleibenden Spieler.</string>
     <string name="game_timer_label">%1$ds</string>
+
+    <!-- In-game how-to-play overlay -->
+    <string name="game_help_open">Spielanleitung</string>
+    <string name="game_help_close">Hilfe schließen</string>
+    <string name="game_help_title_standard">So wird gespielt</string>
+    <string name="game_help_aim_standard">Zielen: Richte dein Handy auf einen Gegner im Kompassring.</string>
+    <string name="game_help_attack_standard">Angreifen: Kippe das Handy nach vorne und schüttle es.</string>
+    <string name="game_help_shield_standard">Schild: Halte das Handy flach, um Angriffe zu blocken.</string>
+    <string name="game_help_dodge_standard">Ausweichen: Kippe das Handy schnell in die andere Richtung.</string>
+    <string name="game_help_title_kids">So wird gespielt</string>
+    <string name="game_help_aim_kids">Zielen: Richte dein Handy auf eine Freundin oder einen Freund im Ring — der Bereich ist schön groß.</string>
+    <string name="game_help_toss_kids">Funkeln werfen: Kippe dein Handy nach vorne und wackle ein bisschen.</string>
+    <string name="game_help_bubble_kids">Zauberblase: Halte dein Handy flach, um eine Blase zu machen und einen Stern zu verdienen.</string>
+    <string name="game_help_rest_kids">Ausruhen: Nachdem du gefangen wurdest, ruhst du dich kurz aus und bist dann wieder dabei!</string>
+    <string name="game_help_dismiss_hint">Zum Schließen irgendwo tippen</string>
 
     <!-- Results screen -->
     <string name="results_title">Rundenergebnis</string>
