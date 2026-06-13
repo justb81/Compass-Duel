@@ -260,11 +260,32 @@ jobs:
           echo "--- Play Store changelog (en-US) ---"
           cat "${NOTES_DIR}/en-US/default.txt"
 
+      # -- Guard: require inputs.tag for manual dispatch --------------------
+      # workflow_dispatch without a tag would leave VERSION empty, causing
+      # integer-comparison errors in the Play-status step below.
+      - name: Validate workflow_dispatch inputs
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          if [ -z "$INPUT_TAG" ]; then
+            echo "::error::workflow_dispatch requires 'tag' input (e.g. v1.2.3). Re-run and supply a tag."
+            exit 1
+          fi
+
       # -- Determine Play Store release status ------------------------------
       - name: Determine Play Store release status
         id: play-status
         run: |
+          if [ -z "$VERSION" ]; then
+            echo "::error::VERSION is empty — cannot determine Play Store release status. For workflow_dispatch, supply the 'tag' input."
+            exit 1
+          fi
           MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          if ! [[ "$MAJOR" =~ ^[0-9]+$ ]]; then
+            echo "::error::VERSION major component '${MAJOR}' is not a non-negative integer (VERSION='${VERSION}'). Cannot determine Play Store release status."
+            exit 1
+          fi
           if [ "$MAJOR" -ge 1 ]; then
             echo "status=COMPLETED" >> "$GITHUB_OUTPUT"
           else

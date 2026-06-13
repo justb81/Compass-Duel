@@ -32,6 +32,13 @@ object KidsRules {
 
     /** Blocking a sparkle with the magic bubble also earns the defender a star. */
     const val STARS_PER_BUBBLE_BLOCK = 1
+
+    /**
+     * Minimum time (ms) between two consecutive sparkle tosses by the same player,
+     * enforced host-side. Mirrors [com.justb81.compassduel.game.standard.StandardRules.ATTACK_COOLDOWN_MILLIS]
+     * so the host remains authoritative even if the client-side SHAKE_DEBOUNCE_MILLIS is bypassed.
+     */
+    const val TOSS_COOLDOWN_MILLIS = 700L
 }
 
 /**
@@ -47,6 +54,12 @@ data class KidsPlayer(
     val inBubble: Boolean = false,
     /** Epoch millis until which the player rests after being caught (0 = not resting). */
     val restingUntilMillis: Long = 0L,
+    /**
+     * Epoch millis after which the next sparkle toss may fire on the host (0 = ready immediately).
+     * Mirrors [com.justb81.compassduel.game.standard.DuelPlayer.attackReadyAtMillis] to
+     * enforce the host-authoritative toss cooldown and prevent rapid-fire toss exploits.
+     */
+    val tossReadyAtMillis: Long = 0L,
 )
 
 /** True while the player is in the post-catch rest window and cannot be caught. */

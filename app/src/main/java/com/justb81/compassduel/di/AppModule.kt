@@ -17,6 +17,7 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,6 +28,20 @@ import javax.inject.Singleton
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class ApplicationScope
+
+/**
+ * Qualifier for the single-threaded game-loop dispatcher.
+ *
+ * All engine state mutations and session lobby mutations must run on this dispatcher
+ * to guarantee single-threaded access without explicit locking (#61).
+ *
+ * Provided as [Dispatchers.Default.limitedParallelism(1)]: no extra thread is
+ * allocated — it reuses the Default pool but serialises all dispatched work, giving
+ * the same happens-before guarantees as a single-threaded executor at zero extra cost.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class GameLoopDispatcher
 
 /**
  * Hilt module that provides application-level singletons.
@@ -72,6 +87,12 @@ abstract class AppModule {
         @ApplicationScope
         fun provideApplicationScope(): CoroutineScope =
             CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+        @Provides
+        @Singleton
+        @GameLoopDispatcher
+        fun provideGameLoopDispatcher(): CoroutineDispatcher =
+            Dispatchers.Default.limitedParallelism(1)
 
         @Provides
         @Singleton

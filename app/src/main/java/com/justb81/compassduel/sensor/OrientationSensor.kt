@@ -7,6 +7,7 @@ import android.hardware.SensorManager
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -59,7 +60,10 @@ class OrientationSensor @Inject constructor(
         val rotationMatrix = FloatArray(MATRIX_SIZE)
         val remappedMatrix = FloatArray(MATRIX_SIZE)
         val orientationValues = FloatArray(ORIENTATION_COMPONENTS)
-        var currentAccuracy = SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM
+        // Captured by the listener closure and accessed from the sensor callback thread by both
+        // onSensorChanged (read) and onAccuracyChanged (write). @Volatile only applies to fields,
+        // not captured locals, so use AtomicInteger for the cross-thread visibility guarantee.
+        val currentAccuracy = AtomicInteger(SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM)
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {
@@ -78,11 +82,11 @@ class OrientationSensor @Inject constructor(
                 val pitch = -Math.toDegrees(orientationValues[1].toDouble()).toFloat()
                 val roll = Math.toDegrees(orientationValues[2].toDouble()).toFloat()
 
-                trySend(OrientationSample(azimuth, pitch, roll, currentAccuracy))
+                trySend(OrientationSample(azimuth, pitch, roll, currentAccuracy.get()))
             }
 
             override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) {
-                currentAccuracy = accuracy
+                currentAccuracy.set(accuracy)
             }
         }
 

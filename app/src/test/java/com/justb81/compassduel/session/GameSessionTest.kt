@@ -14,6 +14,7 @@ import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
+import com.justb81.compassduel.net.protocol.PlayerAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -26,6 +27,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -85,6 +87,7 @@ private class FakeTransport : MessageTransport {
     var discoveryStarted: Boolean = false
     var discoveryStopped: Boolean = false
     var allStopped: Boolean = false
+    override var acceptNewConnections: Boolean = true
 
     override fun startAdvertising(localName: String) { advertisingStarted = true }
     override fun startDiscovery() { discoveryStarted = true }
@@ -119,7 +122,7 @@ private class FakeTransport : MessageTransport {
  * Minimal [GameEngine] stand-in that never ticks, used to verify session wiring
  * without running real game logic in these unit tests.
  */
-private class NoOpEngine(rules: ModeRuleSet, clock: GameClock, scope: CoroutineScope) :
+private open class NoOpEngine(rules: ModeRuleSet, clock: GameClock, scope: CoroutineScope) :
     GameEngine(rules, clock, scope)
 
 /**
@@ -136,6 +139,31 @@ private class StubEngine(
     override fun roundOutcome(): RoundOutcome = stubbedOutcome
 }
 
+/**
+ * [GameEngine] stand-in that exposes [triggerRoundOver] so tests can fire the
+ * [roundOverSignal] on demand, exercising the round-lifecycle wiring in [GameSession]
+ * without running a real tick loop.
+ *
+ * [roundOutcome] always returns [stubbedOutcome] regardless of internal phase state.
+ */
+private class ControllableEngine(
+    rules: ModeRuleSet,
+    clock: GameClock,
+    scope: CoroutineScope,
+    private val stubbedOutcome: RoundOutcome,
+) : GameEngine(rules, clock, scope) {
+
+    /** Completes the [roundOverSignal] deferred, simulating a legitimate ROUND_OVER. */
+    fun triggerRoundOver() {
+        roundOverSignal.complete(Unit)
+    }
+
+    override fun roundOutcome(): RoundOutcome = stubbedOutcome
+}
+
+// Aggregates host/client lobby, security trust-boundary and round-lifecycle scenarios for
+// GameSession; the shared FakeTransport/clock/engine harness keeps these in one suite.
+@Suppress("LargeClass")
 class GameSessionTest {
 
     private val testDispatcher = StandardTestDispatcher()
@@ -152,6 +180,9 @@ class GameSessionTest {
             // backgroundScope: the session's long-lived collectors are cancelled with the
             // test instead of tripping runTest's UncompletedCoroutinesError leak check.
             scope = testScope.backgroundScope,
+            // Use the test dispatcher as the game-loop dispatcher so engine ticks and
+            // session-state mutations are controlled by the test scheduler (#61).
+            gameLoopDispatcher = testDispatcher,
         )
     }
 
@@ -288,6 +319,7 @@ class GameSessionTest {
     fun `client receives LobbyState and updates lobby flow`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
+        session.connectTo("host-ep")
         yield()
 
         val lobbyState = NetMessage.LobbyState(
@@ -305,6 +337,7 @@ class GameSessionTest {
     fun `client receives RoundStart and emits RoundStarted event`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
+        session.connectTo("host-ep")
         yield()
 
         session.sessionEvents.test {
@@ -328,6 +361,7 @@ class GameSessionTest {
     fun `client receives Rematch and emits RematchRequested event`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
+        session.connectTo("host-ep")
         yield()
 
         session.sessionEvents.test {
@@ -529,10 +563,557 @@ class GameSessionTest {
     }
 
     // ---------------------------------------------------------------------------
+    // Security: host trust boundary (#39 - #43)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `host ignores PlayerInput from unmapped endpoint`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // "unknown-ep" has never sent ClientHello, so it is not in endpointToPlayerId.
+        // The input should be silently dropped — no exception thrown.
+        transport.emitIncoming(
+            "unknown-ep",
+            NetMessage.PlayerInput(
+                playerId = 99,
+                aimDegrees = 0f,
+                pitchDegrees = 0f,
+                action = PlayerAction.IDLE,
+            ),
+        )
+        yield()
+
+        // Session remains in the initial lobby state — no crash, no state corruption.
+        assertEquals(1, session.lobby.value?.players?.size)
+    }
+
+    @Test
+    fun `host ignores PlayerInput with mismatched playerId — uses trusted mapped id`() =
+        testScope.runTest {
+            var capturedPlayerId: Int? = null
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    object : NoOpEngine(rules, clk, scp) {
+                        override fun submitInput(
+                            playerId: Int,
+                            aimDegrees: Float,
+                            isShielding: Boolean,
+                            action: PlayerAction?,
+                        ) {
+                            capturedPlayerId = playerId
+                        }
+                    }
+                },
+            )
+
+            session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+            yield()
+
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+
+            session.chooseSeat(cell = 0)
+            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            yield()
+
+            session.chooseCharacter(spriteId = 0)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+            yield()
+
+            session.startMatch()
+            yield()
+
+            // Bob is mapped to id 2. Send a PlayerInput claiming id 99 — host must ignore the
+            // client-supplied id and use the trusted mapped id (2) instead.
+            transport.emitIncoming(
+                "ep2",
+                NetMessage.PlayerInput(
+                    playerId = 99,
+                    aimDegrees = 45f,
+                    pitchDegrees = 0f,
+                    action = PlayerAction.IDLE,
+                ),
+            )
+            yield()
+
+            assertEquals(2, capturedPlayerId)
+        }
+
+    @Test
+    fun `client ignores message not from host endpoint`() = testScope.runTest {
+        val session = buildSession()
+        session.joinLobby(playerName = "Bob")
+        yield()
+        session.connectTo("host-ep")
+        yield()
+
+        // Inject a LobbyState from a different (untrusted) endpoint.
+        transport.emitIncoming(
+            "rogue-ep",
+            NetMessage.LobbyState(
+                mode = GameMode.KIDS,
+                players = emptyList(),
+                yourPlayerId = 2,
+            ),
+        )
+        yield()
+
+        // Client should have ignored the rogue message — lobby must remain null.
+        assertNull(session.lobby.value)
+    }
+
+    @Test
+    fun `host rejects SeatChosen with out-of-range cell`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        val seatsBefore = session.lobby.value?.players?.map { it.seatCell }
+
+        // Cell 9 is outside the valid 0..8 range — should be silently rejected.
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 9))
+        yield()
+
+        assertEquals(seatsBefore, session.lobby.value?.players?.map { it.seatCell })
+    }
+
+    @Test
+    fun `host rejects PlayerInput with non-finite aimDegrees`() = testScope.runTest {
+        var inputReached = false
+        val session = buildSession(
+            engineFactory = GameEngineFactory { rules, clk, scp ->
+                object : NoOpEngine(rules, clk, scp) {
+                    override fun submitInput(
+                        playerId: Int,
+                        aimDegrees: Float,
+                        isShielding: Boolean,
+                        action: PlayerAction?,
+                    ) {
+                        inputReached = true
+                    }
+                }
+            },
+        )
+
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        session.startMatch()
+        yield()
+
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.PlayerInput(
+                playerId = 2,
+                aimDegrees = Float.POSITIVE_INFINITY,
+                pitchDegrees = 0f,
+                action = PlayerAction.IDLE,
+            ),
+        )
+        yield()
+
+        assertFalse(inputReached, "Engine must not receive input with non-finite aimDegrees")
+    }
+
+    @Test
+    fun `host rejects PlayerInput with NaN pitchDegrees`() = testScope.runTest {
+        var inputReached = false
+        val session = buildSession(
+            engineFactory = GameEngineFactory { rules, clk, scp ->
+                object : NoOpEngine(rules, clk, scp) {
+                    override fun submitInput(
+                        playerId: Int,
+                        aimDegrees: Float,
+                        isShielding: Boolean,
+                        action: PlayerAction?,
+                    ) {
+                        inputReached = true
+                    }
+                }
+            },
+        )
+
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        session.startMatch()
+        yield()
+
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.PlayerInput(
+                playerId = 2,
+                aimDegrees = 45f,
+                pitchDegrees = Float.NaN,
+                action = PlayerAction.IDLE,
+            ),
+        )
+        yield()
+
+        assertFalse(inputReached, "Engine must not receive input with NaN pitchDegrees")
+    }
+
+    @Test
+    fun `id allocation does not collide after a disconnect`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // Two clients connect.
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+        transport.emitIncoming("ep3", NetMessage.ClientHello("Carol"))
+        yield()
+
+        val idsBefore = session.lobby.value?.players?.map { it.id }?.toSet()
+        assertEquals(3, idsBefore?.size, "Expected 3 distinct ids before disconnect")
+
+        // Bob (ep2) disconnects.
+        transport.emitConnection(ConnectionEvent.Disconnected("ep2"))
+        yield()
+
+        // A new client connects — must receive the lowest unused id (2), not a duplicate.
+        transport.emitIncoming("ep4", NetMessage.ClientHello("Dave"))
+        yield()
+
+        val idsAfter = session.lobby.value?.players?.map { it.id }
+        assertEquals(idsAfter?.size, idsAfter?.toSet()?.size, "Player ids must be unique after rejoin")
+
+        // Dave should receive id 2 (lowest unused after Bob left).
+        val daveId = session.lobby.value?.players?.find { it.name == "Dave" }?.id
+        assertEquals(2, daveId)
+    }
+
+    @Test
+    fun `transport acceptNewConnections is false after startMatch`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        assertTrue(transport.acceptNewConnections)
+
+        session.startMatch()
+        yield()
+
+        assertFalse(transport.acceptNewConnections)
+    }
+
+    @Test
+    fun `host rejects ClientHello when lobby is full`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // Fill the lobby to MAX_PLAYERS (4 total: 1 host + 3 clients).
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+        transport.emitIncoming("ep3", NetMessage.ClientHello("Carol"))
+        yield()
+        transport.emitIncoming("ep4", NetMessage.ClientHello("Dave"))
+        yield()
+
+        assertEquals(4, session.lobby.value?.players?.size)
+
+        // A fifth player tries to join — must be rejected.
+        transport.emitIncoming("ep5", NetMessage.ClientHello("Eve"))
+        yield()
+
+        assertEquals(4, session.lobby.value?.players?.size)
+        assertNull(session.lobby.value?.players?.find { it.name == "Eve" })
+    }
+
+    @Test
+    fun `host rejects SeatChosen for already-taken cell`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // Alice takes cell 2.
+        session.chooseSeat(cell = 2)
+        yield()
+
+        // Bob joins and attempts to take the same cell — must be rejected.
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 2))
+        yield()
+
+        // Bob's seat must still be null — the collision was rejected.
+        val bob = session.lobby.value?.players?.find { it.name == "Bob" }
+        assertNull(bob?.seatCell)
+    }
+
+    @Test
+    fun `host truncates ClientHello name to 24 characters`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        val longName = "A".repeat(50)
+        transport.emitIncoming("ep2", NetMessage.ClientHello(longName))
+        yield()
+
+        val newPlayer = session.lobby.value?.players?.find { it.name.length <= 24 && it.name != "Alice" }
+        assertNotNull(newPlayer)
+        assertEquals(24, newPlayer!!.name.length)
+        assertEquals("A".repeat(24), newPlayer.name)
+    }
+
+    @Test
+    fun `host rejects host-direction messages sent by clients`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        // These message types are only valid host→client; a client sending them must be ignored.
+        val lobbySize = session.lobby.value?.players?.size
+
+        transport.emitIncoming(
+            "ep2",
+            NetMessage.LobbyState(mode = GameMode.KIDS, players = emptyList(), yourPlayerId = 99),
+        )
+        yield()
+
+        // Lobby must be unaffected — the host's own LobbyState should remain.
+        assertEquals(lobbySize, session.lobby.value?.players?.size)
+        assertEquals(GameMode.STANDARD, session.lobby.value?.mode)
+    }
+
+    @Test
+    fun `transport acceptNewConnections is true after requestRematch`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+        yield()
+
+        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+        yield()
+
+        session.chooseSeat(cell = 0)
+        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+        yield()
+
+        session.chooseCharacter(spriteId = 0)
+        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+        yield()
+
+        session.startMatch()
+        yield()
+        assertFalse(transport.acceptNewConnections)
+
+        session.requestRematch()
+        yield()
+
+        assertTrue(transport.acceptNewConnections)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Round lifecycle — #62 roundAdvanceJob cancellation
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `reset cancels roundAdvanceJob so no spurious RoundStart is emitted after leave`() =
+        testScope.runTest {
+            var engineRef: ControllableEngine? = null
+            val stubbedOutcome = RoundOutcome.KidsOutcome(
+                stats = mapOf(1 to KidsRoundStats(playerId = 1, stars = 1, bubbleBlocks = 0, sparklesThrown = 0)),
+                awards = mapOf(1 to KidsAward.STAR_CHAMPION),
+            )
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    ControllableEngine(rules, clk, scp, stubbedOutcome).also { engineRef = it }
+                },
+            )
+
+            session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+            yield()
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+            session.chooseSeat(cell = 0)
+            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            yield()
+            session.chooseCharacter(spriteId = 0)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+            yield()
+
+            session.startMatch()
+            yield()
+
+            // Trigger ROUND_OVER to launch roundAdvanceJob (which waits ROUND_END_DELAY then
+            // tries to broadcast RoundEnd and emit MatchOver).
+            engineRef!!.triggerRoundOver()
+            yield()
+
+            // Record sent-messages count before leave.
+            val sentBefore = transport.sentMessages.size
+
+            // Leave resets the session — this must cancel roundAdvanceJob so it cannot
+            // complete and fire a spurious RoundEnd/MatchOver event (#62).
+            session.leave()
+            yield()
+
+            // Advance virtual time well past both delay thresholds so roundAdvanceJob
+            // would have fired if not cancelled.
+            delay(5_000L)
+
+            // No RoundEnd message should have been broadcast after leave().
+            val sentAfter = transport.sentMessages.drop(sentBefore)
+            assertTrue(sentAfter.none { it is NetMessage.RoundEnd }) {
+                "roundAdvanceJob must be cancelled by reset() — spurious RoundEnd found"
+            }
+        }
+
+    @Test
+    fun `requestRematch cancels roundAdvanceJob so no spurious RoundStart is emitted`() =
+        testScope.runTest {
+            var engineRef: ControllableEngine? = null
+            val stubbedOutcome = RoundOutcome.StandardWinner(winnerId = null) // draw, non-final
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    ControllableEngine(rules, clk, scp, stubbedOutcome).also { engineRef = it }
+                },
+            )
+
+            session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+            yield()
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+            session.chooseSeat(cell = 0)
+            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            yield()
+            session.chooseCharacter(element = Element.FIRE)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(element = Element.WATER))
+            yield()
+
+            session.startMatch()
+            yield()
+
+            // Trigger ROUND_OVER — roundAdvanceJob will launch and wait for delays.
+            engineRef!!.triggerRoundOver()
+            yield()
+
+            // Capture RoundStart count before rematch (there is one from startMatch).
+            val roundStartsBefore = transport.sentMessages.count { it is NetMessage.RoundStart }
+
+            // Call requestRematch — this must cancel the in-flight roundAdvanceJob.
+            session.requestRematch()
+            yield()
+
+            // Advance past all delays — the cancelled roundAdvanceJob must NOT start a
+            // new round that would emit another RoundStart (#62).
+            delay(5_000L)
+
+            val roundStartsAfter = transport.sentMessages.count { it is NetMessage.RoundStart }
+            assertEquals(roundStartsBefore, roundStartsAfter) {
+                "requestRematch must cancel roundAdvanceJob — spurious RoundStart found"
+            }
+        }
+
+    // ---------------------------------------------------------------------------
+    // Round lifecycle — #68 client roundEnd cleared between rounds
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `client roundEnd is cleared on next RoundStart for non-final rounds`() =
+        testScope.runTest {
+            val session = buildSession()
+            session.joinLobby(playerName = "Bob")
+            yield()
+            session.connectTo("host-ep")
+            yield()
+            transport.emitConnection(ConnectionEvent.Connected("host-ep", "host-ep"))
+            yield()
+
+            // Simulate the host broadcasting a non-final RoundEnd (no matchWinnerId).
+            transport.emitIncoming(
+                "host-ep",
+                NetMessage.RoundEnd(
+                    roundWinnerId = 1,
+                    matchScore = mapOf(1 to 1, 2 to 0),
+                    matchWinnerId = null,
+                ),
+            )
+            yield()
+
+            // Client should have the non-final roundEnd set.
+            assertNotNull(session.roundEnd.value) {
+                "roundEnd should be set after receiving RoundEnd message"
+            }
+
+            // Now the host starts the next round.
+            transport.emitIncoming(
+                "host-ep",
+                NetMessage.RoundStart(
+                    mode = GameMode.STANDARD,
+                    roundIndex = 1,
+                    roundDurationSeconds = 90,
+                    players = emptyList(),
+                    facingCaptureSeconds = 3,
+                ),
+            )
+            yield()
+
+            // Client must clear roundEnd on RoundStart — symmetric with host (#68).
+            assertNull(session.roundEnd.value) {
+                "roundEnd must be null after RoundStart — stale between-round results (#68)"
+            }
+        }
+
+    // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
 
     private fun assertTrue(condition: Boolean, lazyMessage: () -> String) {
         org.junit.jupiter.api.Assertions.assertTrue(condition, lazyMessage)
+    }
+
+    private fun assertNotNull(value: Any?, lazyMessage: () -> String) {
+        org.junit.jupiter.api.Assertions.assertNotNull(value, lazyMessage)
+    }
+
+    private fun assertNull(value: Any?, lazyMessage: () -> String) {
+        org.junit.jupiter.api.Assertions.assertNull(value, lazyMessage)
+    }
+
+    private fun assertEquals(expected: Any?, actual: Any?, lazyMessage: () -> String) {
+        org.junit.jupiter.api.Assertions.assertEquals(expected, actual, lazyMessage)
     }
 }

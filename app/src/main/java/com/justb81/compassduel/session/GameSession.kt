@@ -1,6 +1,7 @@
 package com.justb81.compassduel.session
 
 import com.justb81.compassduel.di.ApplicationScope
+import com.justb81.compassduel.di.GameLoopDispatcher
 import com.justb81.compassduel.game.Position
 import com.justb81.compassduel.game.engine.EnginePlayerSetup
 import com.justb81.compassduel.game.engine.GameClock
@@ -19,7 +20,7 @@ import com.justb81.compassduel.net.protocol.GameSnapshot
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.net.protocol.NetMessage
 import com.justb81.compassduel.net.protocol.PlayerAction
-import com.justb81.compassduel.net.protocol.RoundPhase
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -92,6 +94,7 @@ class GameSession @Inject constructor(
     private val clock: GameClock,
     private val engineFactory: GameEngineFactory,
     @ApplicationScope private val scope: CoroutineScope,
+    @GameLoopDispatcher private val gameLoopDispatcher: CoroutineDispatcher,
 ) {
 
     // ---------------------------------------------------------------------------
@@ -118,7 +121,13 @@ class GameSession @Inject constructor(
     /** Round-end result, or null while the round is in progress. */
     val roundEnd: StateFlow<NetMessage.RoundEnd?> = _roundEnd.asStateFlow()
 
-    private val _sessionEvents = MutableSharedFlow<SessionEvent>(extraBufferCapacity = SESSION_BUFFER)
+    // replay=1: a late or re-subscribing collector (e.g. after recomposition tears down
+    // LaunchedEffect) receives the most recent navigation event so navigation is never
+    // permanently stranded by a dropped event (#63).
+    private val _sessionEvents = MutableSharedFlow<SessionEvent>(
+        replay = 1,
+        extraBufferCapacity = SESSION_BUFFER,
+    )
 
     /** Navigation-level events that drive screen transitions. */
     val sessionEvents: SharedFlow<SessionEvent> = _sessionEvents.asSharedFlow()
@@ -142,12 +151,36 @@ class GameSession @Inject constructor(
     private var localPlayerName: String = ""
     private var hostEndpointId: String? = null
     private var clientPlayerName: String = ""
+
+    // lobbyPlayers is guarded by lobbyLock: it is mutated both from the transport-collector
+    // coroutines (Dispatchers.Default pool) and from main-thread API calls (hostLobby,
+    // chooseSeat, chooseCharacter, startMatch). All read-modify-write sequences on
+    // lobbyPlayers must be performed inside synchronized(lobbyLock) (#61).
+    //
+    // endpointToPlayerId is a ConcurrentHashMap so its individual operations (put/remove/get)
+    // are atomic. Compound sequences that read AND mutate it (e.g. allocating a new id) are
+    // also protected by lobbyLock so they remain consistent with lobbyPlayers mutations (#61).
+    private val lobbyLock = Any()
     private var lobbyPlayers: MutableList<LobbyPlayer> = mutableListOf()
-    private val endpointToPlayerId: MutableMap<String, Int> = mutableMapOf()
+    private val endpointToPlayerId: MutableMap<String, Int> = ConcurrentHashMap()
     private var engine: GameEngine? = null
     private var snapshotJob: Job? = null
     private var messageJob: Job? = null
     private var connectionJob: Job? = null
+
+    /**
+     * Tracks the coroutine that awaits [GameEngine.roundOverSignal] so it can be
+     * cancelled on reset/rematch, preventing a dangling await on a never-completing
+     * deferred when the engine is stopped mid-round (e.g. disconnect, #66).
+     */
+    private var roundOverWaitJob: Job? = null
+
+    /**
+     * Tracks the coroutine launched by [computeAndBroadcastRoundEnd] that waits for
+     * [ROUND_END_DELAY_MILLIS] (and possibly [NEXT_ROUND_DELAY_MILLIS]) before advancing
+     * the match. Stored so it can be cancelled on reset/rematch (#62).
+     */
+    private var roundAdvanceJob: Job? = null
     private var roundIndex: Int = 0
     private var matchScore: MatchScore = MatchScore()
     private var matchInProgress: Boolean = false
@@ -168,7 +201,9 @@ class GameSession @Inject constructor(
         reset()
         _role.value = SessionRole.HOST
         localPlayerName = playerName
-        lobbyPlayers = mutableListOf(LobbyPlayer(id = HOST_PLAYER_ID, name = playerName))
+        synchronized(lobbyLock) {
+            lobbyPlayers = mutableListOf(LobbyPlayer(id = HOST_PLAYER_ID, name = playerName))
+        }
         broadcastLobbyToAll(mode)
         startConnectionListener()
         startMessageListener()
@@ -194,7 +229,7 @@ class GameSession @Inject constructor(
      */
     fun startMatch() {
         val currentLobby = _lobby.value ?: return
-        val players = lobbyPlayers.toList()
+        val players = synchronized(lobbyLock) { lobbyPlayers.toList() }
 
         check(players.size in MIN_PLAYERS..MAX_PLAYERS) {
             "Need $MIN_PLAYERS–$MAX_PLAYERS players; have ${players.size}"
@@ -213,6 +248,7 @@ class GameSession @Inject constructor(
         matchScore = MatchScore()
         matchInProgress = true
         startRoundInternal(currentLobby.mode, players)
+        transport.acceptNewConnections = false
     }
 
     /**
@@ -220,8 +256,17 @@ class GameSession @Inject constructor(
      * and emits [SessionEvent.RematchRequested].
      */
     fun requestRematch() {
+        // Cancel any pending round-advance coroutine before resetting match state (#62).
+        roundAdvanceJob?.cancel()
+        roundAdvanceJob = null
+        // Cancel the roundOverSignal awaiter so a late-completing signal cannot
+        // trigger a spurious computeAndBroadcastRoundEnd after the rematch resets
+        // all state (#66 / #62).
+        roundOverWaitJob?.cancel()
+        roundOverWaitJob = null
         transport.broadcast(NetMessage.Rematch)
         val currentLobby = _lobby.value ?: return
+        transport.acceptNewConnections = true
         matchInProgress = false
         roundIndex = 0
         matchScore = MatchScore()
@@ -327,7 +372,7 @@ class GameSession @Inject constructor(
      */
     fun submitLocalInput(input: NetMessage.PlayerInput) {
         when (_role.value) {
-            SessionRole.HOST -> feedInputToEngine(input)
+            SessionRole.HOST -> feedInputToEngine(input, HOST_PLAYER_ID)
             SessionRole.CLIENT -> transport.send(hostEndpointId ?: return, input)
             null -> Unit
         }
@@ -382,7 +427,9 @@ class GameSession @Inject constructor(
                     engine?.stop()
                     _sessionEvents.tryEmit(SessionEvent.PeerLost)
                 } else {
-                    lobbyPlayers.removeAll { it.id == playerId }
+                    synchronized(lobbyLock) {
+                        lobbyPlayers.removeAll { it.id == playerId }
+                    }
                     broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
                 }
             }
@@ -399,44 +446,93 @@ class GameSession @Inject constructor(
     private fun handleIncomingMessage(endpointId: String, message: NetMessage) {
         when (_role.value) {
             SessionRole.HOST -> handleHostIncoming(endpointId, message)
-            SessionRole.CLIENT -> handleClientIncoming(message)
+            SessionRole.CLIENT -> handleClientIncoming(endpointId, message)
             null -> Unit
         }
     }
 
     private fun handleHostIncoming(endpointId: String, message: NetMessage) {
         when (message) {
-            is NetMessage.ClientHello -> {
-                val newId = lobbyPlayers.size + 1
-                endpointToPlayerId[endpointId] = newId
-                lobbyPlayers.add(LobbyPlayer(id = newId, name = message.playerName))
-                broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
-            }
-            is NetMessage.SeatChosen -> {
-                val playerId = endpointToPlayerId[endpointId] ?: return
-                updatePlayer(playerId) { it.copy(seatCell = message.cell) }
-                broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
-            }
-            is NetMessage.CharacterChosen -> {
-                val playerId = endpointToPlayerId[endpointId] ?: return
-                updatePlayer(playerId) { p ->
-                    p.copy(
-                        element = message.element,
-                        spriteId = message.spriteId,
-                        ready = message.element != null || message.spriteId != null,
-                    )
-                }
-                broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
-            }
-            is NetMessage.PlayerInput -> feedInputToEngine(message)
-            else -> Unit
+            // Messages only valid in the host→client direction — reject from clients.
+            is NetMessage.LobbyState,
+            is NetMessage.RoundStart,
+            is NetMessage.StateBroadcast,
+            is NetMessage.RoundEnd,
+            is NetMessage.Rematch,
+            -> Unit
+            is NetMessage.ClientHello -> handleClientHello(endpointId, message)
+            is NetMessage.SeatChosen -> handleSeatChosen(endpointId, message)
+            is NetMessage.CharacterChosen -> handleCharacterChosen(endpointId, message)
+            is NetMessage.PlayerInput -> handlePlayerInput(endpointId, message)
         }
     }
 
-    private fun handleClientIncoming(message: NetMessage) {
+    private fun handleClientHello(endpointId: String, message: NetMessage.ClientHello) {
+        // Truncate name to prevent unbounded data reaching game logic.
+        val name = message.playerName.take(MAX_PLAYER_NAME_LENGTH)
+        // The compound size-check → id-allocation → add must be atomic under lobbyLock
+        // so concurrent ClientHello messages cannot both pass the size guard (#61).
+        val added = synchronized(lobbyLock) {
+            // Cap lobby size: reject late joiners.
+            if (lobbyPlayers.size >= MAX_PLAYERS) return@synchronized false
+            // Allocate lowest unused id (ids start at HOST_PLAYER_ID + 1 = 2).
+            val newId = (HOST_PLAYER_ID + 1..MAX_PLAYERS + 1).first { candidate ->
+                lobbyPlayers.none { it.id == candidate }
+            }
+            endpointToPlayerId[endpointId] = newId
+            lobbyPlayers.add(LobbyPlayer(id = newId, name = name))
+            true
+        }
+        if (added) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    private fun handleSeatChosen(endpointId: String, message: NetMessage.SeatChosen) {
+        // Reject out-of-range cell indices.
+        if (message.cell !in 0..8) return
+        val playerId = endpointToPlayerId[endpointId] ?: return
+        // The duplicate-seat check and the update must be atomic under lobbyLock
+        // so two clients cannot concurrently claim the same seat (#61).
+        val updated = synchronized(lobbyLock) {
+            // Reject already-taken seats.
+            if (lobbyPlayers.any { it.seatCell == message.cell }) return@synchronized false
+            updatePlayerLocked(playerId) { it.copy(seatCell = message.cell) }
+            true
+        }
+        if (updated) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    private fun handleCharacterChosen(endpointId: String, message: NetMessage.CharacterChosen) {
+        val playerId = endpointToPlayerId[endpointId] ?: return
+        synchronized(lobbyLock) {
+            updatePlayerLocked(playerId) { p ->
+                p.copy(
+                    element = message.element,
+                    spriteId = message.spriteId,
+                    ready = message.element != null || message.spriteId != null,
+                )
+            }
+        }
+        broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    private fun handlePlayerInput(endpointId: String, message: NetMessage.PlayerInput) {
+        // Reject inputs from endpoints not registered in the lobby.
+        val trustedId = endpointToPlayerId[endpointId] ?: return
+        // Reject non-finite sensor values before they reach game logic.
+        if (!message.aimDegrees.isFinite()) return
+        if (!message.pitchDegrees.isFinite()) return
+        feedInputToEngine(message, trustedId)
+    }
+
+    private fun handleClientIncoming(endpointId: String, message: NetMessage) {
+        // Only accept messages from the known host endpoint.
+        if (endpointId != hostEndpointId) return
         when (message) {
             is NetMessage.LobbyState -> _lobby.value = message
             is NetMessage.RoundStart -> {
+                // Symmetric with the host: host clears _roundEnd before broadcasting
+                // RoundStart; client clears it here upon receipt — both roles see the
+                // same "no stale roundEnd during the new round" invariant (#68).
                 _roundEnd.value = null
                 _snapshot.value = null
                 _sessionEvents.tryEmit(SessionEvent.RoundStarted)
@@ -447,6 +543,9 @@ class GameSession @Inject constructor(
                 if (message.matchWinnerId != null || message.kidsAwards != null) {
                     _sessionEvents.tryEmit(SessionEvent.MatchOver)
                 }
+                // Non-final round: _roundEnd remains set (brief display window) until the
+                // next RoundStart arrives and clears it — matching the host's own display
+                // window (#68).
             }
             is NetMessage.Rematch -> {
                 _roundEnd.value = null
@@ -491,27 +590,42 @@ class GameSession @Inject constructor(
             )
         }
 
-        val activeEngine = engineFactory.create(rules, clock, scope)
+        // Create the engine with a scope that is confined to the single-threaded
+        // gameLoopDispatcher so all tick-loop state mutations run on one thread (#61).
+        // The scope inherits the SupervisorJob from the application scope so that a tick
+        // failure does not cancel unrelated coroutines.
+        val engineScope = CoroutineScope(scope.coroutineContext + gameLoopDispatcher)
+        val activeEngine = engineFactory.create(rules, clock, engineScope)
         engine = activeEngine
         activeEngine.startRound(engineSetup, roundIndex)
 
         snapshotJob?.cancel()
         snapshotJob = scope.launch {
-            var wasRoundOver = false
+            // Forward all snapshots to clients. Snapshot collection only; round-end
+            // computation is triggered by roundOverSignal below (#66).
             activeEngine.snapshots.collect { snap ->
                 _snapshot.value = snap
                 transport.broadcast(NetMessage.StateBroadcast(snap))
-
-                if (snap.phase == RoundPhase.ROUND_OVER && !wasRoundOver) {
-                    wasRoundOver = true
-                    computeAndBroadcastRoundEnd(mode)
-                }
             }
+        }
+
+        // Await the engine's terminal completion signal rather than observing a
+        // ROUND_OVER snapshot inside the tick loop. This is race-free: the signal
+        // is completed atomically inside transitionToRoundOver() before the snapshot
+        // is emitted, so even if the tick loop is cancelled at the boundary the
+        // round-end broadcast still fires (#66).
+        // The job is stored so reset()/requestRematch() can cancel it, preventing a
+        // dangling await when the engine is stopped mid-round (e.g. peer disconnect).
+        roundOverWaitJob?.cancel()
+        roundOverWaitJob = scope.launch {
+            activeEngine.roundOverSignal.await()
+            computeAndBroadcastRoundEnd(mode)
         }
     }
 
     private fun computeAndBroadcastRoundEnd(mode: GameMode) {
-        scope.launch {
+        // Store in roundAdvanceJob so reset() and requestRematch() can cancel it (#62).
+        roundAdvanceJob = scope.launch {
             delay(ROUND_END_DELAY_MILLIS)
 
             val roundEnd = buildRoundEnd(mode) ?: return@launch
@@ -525,9 +639,13 @@ class GameSession @Inject constructor(
                     } else {
                         delay(NEXT_ROUND_DELAY_MILLIS)
                         roundIndex++
+                        // Clear between-round results on both host and client at the same
+                        // lifecycle point (before RoundStart is broadcast) so both roles
+                        // display the same "stale roundEnd" window (#68).
                         _roundEnd.value = null
                         val currentLobby = _lobby.value ?: return@launch
-                        startRoundInternal(currentLobby.mode, lobbyPlayers.toList())
+                        val currentPlayers = synchronized(lobbyLock) { lobbyPlayers.toList() }
+                        startRoundInternal(currentLobby.mode, currentPlayers)
                     }
                 }
                 GameMode.KIDS -> _sessionEvents.tryEmit(SessionEvent.MatchOver)
@@ -566,14 +684,14 @@ class GameSession @Inject constructor(
         return NetMessage.RoundEnd(kidsAwards = kidsOutcome.awards, kidsStats = statsList)
     }
 
-    private fun feedInputToEngine(input: NetMessage.PlayerInput) {
+    private fun feedInputToEngine(input: NetMessage.PlayerInput, trustedPlayerId: Int) {
         val isShielding = input.action == PlayerAction.SHIELD
         val action = when (input.action) {
             PlayerAction.ATTACK, PlayerAction.DODGE -> input.action
             else -> null
         }
         engine?.submitInput(
-            playerId = input.playerId,
+            playerId = trustedPlayerId,
             aimDegrees = input.aimDegrees,
             isShielding = isShielding,
             action = action,
@@ -585,7 +703,7 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun broadcastLobbyToAll(mode: GameMode) {
-        val players = lobbyPlayers.toList()
+        val players = synchronized(lobbyLock) { lobbyPlayers.toList() }
         _lobby.value = NetMessage.LobbyState(mode = mode, players = players, yourPlayerId = HOST_PLAYER_ID)
         endpointToPlayerId.forEach { (endpointId, playerId) ->
             transport.send(
@@ -595,12 +713,25 @@ class GameSession @Inject constructor(
         }
     }
 
+    /**
+     * Mutates the host player's [LobbyPlayer] entry.
+     *
+     * Must be called while holding [lobbyLock] when accessed from a coroutine that may
+     * race with transport-collector coroutines (#61).
+     */
     private fun updateHostPlayer(transform: (LobbyPlayer) -> LobbyPlayer) {
-        val idx = lobbyPlayers.indexOfFirst { it.id == HOST_PLAYER_ID }
-        if (idx >= 0) lobbyPlayers[idx] = transform(lobbyPlayers[idx])
+        synchronized(lobbyLock) {
+            val idx = lobbyPlayers.indexOfFirst { it.id == HOST_PLAYER_ID }
+            if (idx >= 0) lobbyPlayers[idx] = transform(lobbyPlayers[idx])
+        }
     }
 
-    private fun updatePlayer(playerId: Int, transform: (LobbyPlayer) -> LobbyPlayer) {
+    /**
+     * Mutates a [LobbyPlayer] by [playerId] **without** acquiring [lobbyLock].
+     *
+     * Callers are responsible for holding [lobbyLock] before calling this function.
+     */
+    private fun updatePlayerLocked(playerId: Int, transform: (LobbyPlayer) -> LobbyPlayer) {
         val idx = lobbyPlayers.indexOfFirst { it.id == playerId }
         if (idx >= 0) lobbyPlayers[idx] = transform(lobbyPlayers[idx])
     }
@@ -610,6 +741,13 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun reset() {
+        // Cancel the round-advance coroutine first so it cannot race a new match (#62).
+        roundAdvanceJob?.cancel()
+        roundAdvanceJob = null
+        // Cancel the roundOverSignal awaiter so it cannot fire against a reset/rematched
+        // session when the engine was stopped mid-round (e.g. peer disconnect, #66).
+        roundOverWaitJob?.cancel()
+        roundOverWaitJob = null
         snapshotJob?.cancel()
         snapshotJob = null
         messageJob?.cancel()
@@ -622,7 +760,9 @@ class GameSession @Inject constructor(
         _lobby.value = null
         _snapshot.value = null
         _roundEnd.value = null
-        lobbyPlayers.clear()
+        synchronized(lobbyLock) {
+            lobbyPlayers.clear()
+        }
         endpointToPlayerId.clear()
         localPlayerName = ""
         clientPlayerName = ""
@@ -630,6 +770,7 @@ class GameSession @Inject constructor(
         roundIndex = 0
         matchScore = MatchScore()
         matchInProgress = false
+        transport.acceptNewConnections = true
     }
 
     companion object {
@@ -637,6 +778,7 @@ class GameSession @Inject constructor(
         private const val MIN_PLAYERS = 2
         private const val MAX_PLAYERS = 4
         private const val GRID_COLUMNS = 3
+        private const val MAX_PLAYER_NAME_LENGTH = 24
 
         /** Facing-capture window at round start (seconds). */
         private const val FACING_CAPTURE_SECONDS = 3

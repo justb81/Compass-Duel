@@ -218,6 +218,105 @@ class GestureClassifierTest {
     }
 
     // ---------------------------------------------------------------------------
+    // DODGE — reversal without zero-crossing (Issue #58 fix)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `DODGE fires when pitch swings back toward zero without crossing it (30 to 2)`() {
+        // +30 → +2: swing of -28° (≥25°) without crossing zero.
+        // Old impl required isOppositeSign (product < 0) — would have missed this.
+        val first = MotionSample(
+            timestampMillis = baseTime,
+            pitchDegrees = 30f,
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+        val second = MotionSample(
+            timestampMillis = baseTime + 100L,
+            pitchDegrees = 2f, // same sign, 28° reversal toward zero
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+
+        standardClassifier.onSample(first)
+        assertEquals(GestureEvent.DODGE, standardClassifier.onSample(second))
+    }
+
+    @Test
+    fun `DODGE does not fire when both samples are same sign but swing is below threshold`() {
+        // +30 → +10: only 20° reversal toward zero — below DODGE_TILT_DELTA_DEGREES (25°)
+        val first = MotionSample(
+            timestampMillis = baseTime,
+            pitchDegrees = 30f,
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+        val second = MotionSample(
+            timestampMillis = baseTime + 100L,
+            pitchDegrees = 10f,
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+
+        standardClassifier.onSample(first)
+        assertNull(standardClassifier.onSample(second))
+    }
+
+    @Test
+    fun `DODGE fires on first pair when pitch baseline is exactly zero and swing is large`() {
+        // prev pitch = 0, current pitch = -30 → swing of 30° away from zero baseline.
+        val first = MotionSample(
+            timestampMillis = baseTime,
+            pitchDegrees = 0f,
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+        val second = MotionSample(
+            timestampMillis = baseTime + 100L,
+            pitchDegrees = -GestureThresholds.DODGE_TILT_DELTA_DEGREES,
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+
+        standardClassifier.onSample(first)
+        assertEquals(GestureEvent.DODGE, standardClassifier.onSample(second))
+    }
+
+    @Test
+    fun `no DODGE on the very first sample (no previous sample to compare)`() {
+        // The first call to onSample has no previous sample — DODGE cannot fire.
+        val sample = MotionSample(
+            timestampMillis = baseTime,
+            pitchDegrees = -30f,
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+        assertNull(standardClassifier.onSample(sample))
+    }
+
+    @Test
+    fun `ATTACK takes precedence over DODGE when both conditions are simultaneously met`() {
+        // Provide a previous sample so the DODGE path is eligible.
+        val prev = MotionSample(
+            timestampMillis = baseTime,
+            pitchDegrees = 30f,
+            rollDegrees = 0f,
+            linearAccelMagnitude = 0.1f,
+        )
+        // This sample meets ATTACK (pitch > threshold, shake spike) AND DODGE reversal criteria.
+        // ATTACK is checked first in the classifier, so ATTACK must win.
+        val attackAndDodge = MotionSample(
+            timestampMillis = baseTime + 100L,
+            pitchDegrees = GestureThresholds.ATTACK_PITCH_DEGREES + 1f, // above attack threshold
+            rollDegrees = 0f,
+            linearAccelMagnitude = GestureThresholds.STANDARD_SHAKE_MPS2 + 0.5f, // shake spike
+        )
+
+        standardClassifier.onSample(prev)
+        assertEquals(GestureEvent.ATTACK, standardClassifier.onSample(attackAndDodge))
+    }
+
+    // ---------------------------------------------------------------------------
     // Shield posture — flat phone
     // ---------------------------------------------------------------------------
 

@@ -4,6 +4,9 @@
 Checks that signing credentials are not exposed as plain env vars in the
 Gradle build step, that secrets are re-masked, that a cleanup step exists,
 and that concurrency is configured to prevent overlapping releases.
+
+Also checks that the Play Store service-account secret is not exposed as a
+plain env var on any Gradle step, and that the SA file is cleaned up.
 """
 
 import sys
@@ -11,6 +14,10 @@ import yaml
 
 WORKFLOW_PATH = ".github/workflows/release.yml"
 SIGNING_SECRET_KEYS = {"KEYSTORE_PASSWORD", "KEY_ALIAS", "KEY_PASSWORD"}
+# The env var name used when the Play SA JSON secret is loaded into the step env.
+PLAY_SA_ENV_KEY = "GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"
+# The temp file path the SA JSON is written to on disk.
+PLAY_SA_FILE_PATH = "/tmp/gpp-sa.json"
 
 
 def fail(msg: str) -> None:
@@ -49,29 +56,43 @@ def main() -> None:
         if not any(key in s.get("run", "") for s in mask_steps):
             fail(f"Signing secret {key!r} is not masked via '::add-mask::' in any step.")
 
-    # 3. Signing secrets must NOT appear in env of the Gradle build step.
-    build_steps = [
+    # 3. Signing secrets must NOT appear in env of ANY Gradle step (not just
+    #    assembleRelease), and the Play SA secret must not be exposed either.
+    gradle_steps = [
         s for s in steps
-        if s.get("run") and "gradlew" in s.get("run", "") and "assembleRelease" in s.get("run", "")
+        if s.get("run") and "gradlew" in s.get("run", "")
     ]
-    if not build_steps:
-        fail("Could not locate the Gradle release build step — check validate-release-security.py if the step name changed.")
-    for build_step in build_steps:
-        env = build_step.get("env") or {}
-        leaked = SIGNING_SECRET_KEYS & set(env.keys())
-        if leaked:
+    if not gradle_steps:
+        fail("Could not locate any Gradle invocation step — check validate-release-security.py if the step name changed.")
+    for gradle_step in gradle_steps:
+        env = gradle_step.get("env") or {}
+        leaked_signing = SIGNING_SECRET_KEYS & set(env.keys())
+        if leaked_signing:
             fail(
-                f"Signing secret(s) {leaked} are set as plain env vars on the Gradle build step. "
+                f"Signing secret(s) {leaked_signing} are set as plain env vars on a Gradle step. "
                 "Write them to ~/.gradle/gradle.properties instead."
             )
+        if PLAY_SA_ENV_KEY in env:
+            fail(
+                f"Play Store service-account secret '{PLAY_SA_ENV_KEY}' is set as a plain env var "
+                "on a Gradle step. Write the JSON to a temp file (e.g. /tmp/gpp-sa.json) and pass "
+                "GOOGLE_PLAY_SERVICE_ACCOUNT_FILE instead."
+            )
 
-    # 4. A cleanup step must run with `if: always()`.
+    # 4. A cleanup step must run with `if: always()` and remove both the
+    #    keystore and the Play SA file so secrets never persist on a reused runner.
     cleanup_steps = [
         s for s in steps
         if s.get("if") == "always()" and s.get("run") and "release.keystore" in s.get("run", "")
     ]
     if not cleanup_steps:
         fail("No cleanup step found with 'if: always()' that removes /tmp/release.keystore — secrets may persist on a reused runner.")
+    for cleanup_step in cleanup_steps:
+        if PLAY_SA_FILE_PATH not in cleanup_step.get("run", ""):
+            fail(
+                f"Cleanup step does not remove Play SA file '{PLAY_SA_FILE_PATH}' — "
+                "the service-account credentials may persist on a reused runner."
+            )
 
     # 5. Signing credentials must be written to ~/.gradle/gradle.properties.
     props_steps = [

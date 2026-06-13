@@ -48,10 +48,19 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = if (keystoreFile != null) {
-                signingConfigs.getByName("release")
+            if (keystoreFile != null) {
+                signingConfig = signingConfigs.getByName("release")
             } else {
-                signingConfigs.getByName("debug")
+                // No release keystore configured: leave signingConfig unset (null)
+                // so Gradle does not silently sign the release artifact with the
+                // debug key.  A task-graph hook below blocks assembleRelease and
+                // bundleRelease with a clear error message.
+                signingConfig = null
+                logger.warn(
+                    "WARNING: KEYSTORE_FILE is not set — release build type has no signing config. " +
+                    "assembleRelease and bundleRelease will FAIL. " +
+                    "Set KEYSTORE_FILE and compassduel.signing.* properties to sign release artifacts."
+                )
             }
         }
     }
@@ -95,6 +104,26 @@ android {
 kotlin {
     compilerOptions {
         jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+    }
+}
+
+// Fail assembleRelease / bundleRelease at task-graph evaluation time when no
+// release keystore is configured, so the error is clear and immediate rather
+// than a silent debug-signed artifact or an opaque signing failure later.
+if (keystoreFile == null) {
+    gradle.taskGraph.whenReady {
+        val blockedTasks = listOf("assembleRelease", "bundleRelease")
+        val triggered = allTasks.filter { task ->
+            blockedTasks.any { task.name == it || task.name.endsWith(it.replaceFirstChar { c -> c.uppercaseChar() }) }
+        }
+        if (triggered.isNotEmpty()) {
+            val names = triggered.joinToString(", ") { it.path }
+            error(
+                "Release signing is not configured (KEYSTORE_FILE is not set). " +
+                "Cannot produce a properly signed release artifact for: $names. " +
+                "Set KEYSTORE_FILE and compassduel.signing.* properties before running release tasks."
+            )
+        }
     }
 }
 

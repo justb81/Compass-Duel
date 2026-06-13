@@ -12,6 +12,7 @@ import com.justb81.compassduel.net.protocol.PlayerAction
 import com.justb81.compassduel.net.protocol.PlayerSnapshot
 import com.justb81.compassduel.net.protocol.PlayerStatus
 import com.justb81.compassduel.net.protocol.RoundPhase
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -268,14 +269,37 @@ open class GameEngine(
     /** Live stream of authoritative game state, updated every tick. */
     val snapshots: StateFlow<GameSnapshot> = _snapshots
 
-    private var engineState: EngineState? = null
+    /**
+     * Completes exactly once when the round transitions to [RoundPhase.ROUND_OVER].
+     *
+     * The session awaits this deferred to trigger [computeAndBroadcastRoundEnd] even
+     * when the tick loop is cancelled at the round-over boundary (issue #66).
+     * A new deferred is created by each [startRound] call.
+     */
+    private var _roundOverSignal: CompletableDeferred<Unit> = CompletableDeferred()
+
+    /**
+     * A terminal signal that completes when the engine's round enters [RoundPhase.ROUND_OVER].
+     * Awaiting this deferred is race-free: it completes atomically inside the tick loop
+     * before the snapshot is emitted, so the session always receives the signal even when
+     * [stop] is called at the same boundary.
+     */
+    val roundOverSignal: CompletableDeferred<Unit>
+        get() = _roundOverSignal
+
+    // These fields are written by the tick loop and read by roundOutcome() which may be called
+    // from a different coroutine (the session round-end path). @Volatile provides the required
+    // happens-before guarantee for single-write/single-read cross-thread visibility (#61).
+    @Volatile private var engineState: EngineState? = null
+
+    @Volatile private var currentPhase: RoundPhase = RoundPhase.COUNTDOWN
+
     private var setup: List<EnginePlayerSetup> = emptyList()
     private var roundIndex: Int = 0
     private var roundStartMillis: Long = 0L
     private var activePhaseStartMillis: Long = 0L
     private var sequenceNumber: Int = 0
     private var tickJob: Job? = null
-    private var currentPhase: RoundPhase = RoundPhase.COUNTDOWN
 
     // Input queue — written from any thread, drained on the tick coroutine
     private val inputLock = Any()
@@ -296,6 +320,9 @@ open class GameEngine(
             continuousInputs.clear()
             queuedActions.clear()
         }
+
+        // Reset the round-over signal so the new round has a fresh, uncompleted deferred.
+        _roundOverSignal = CompletableDeferred()
 
         setup = playerSetup
         this.roundIndex = roundIndex
@@ -324,7 +351,7 @@ open class GameEngine(
      * @param isShielding True when the device is in shield posture.
      * @param action Optional discrete action; null means posture-only update.
      */
-    fun submitInput(
+    open fun submitInput(
         playerId: Int,
         aimDegrees: Float,
         isShielding: Boolean,
@@ -342,10 +369,13 @@ open class GameEngine(
      * Returns the authoritative outcome of the current round, or null when the round
      * has not yet ended.
      *
-     * Only meaningful once [snapshots] has emitted a snapshot with
-     * [com.justb81.compassduel.net.protocol.RoundPhase.ROUND_OVER].
+     * Returns null unless the engine is in [RoundPhase.ROUND_OVER], preventing
+     * callers from receiving a provisional (and potentially wrong) outcome mid-round.
      */
-    open fun roundOutcome(): RoundOutcome? = engineState?.let { rules.roundOutcome(it) }
+    open fun roundOutcome(): RoundOutcome? {
+        if (currentPhase != RoundPhase.ROUND_OVER) return null
+        return engineState?.let { rules.roundOutcome(it) }
+    }
 
     /** Stops the tick loop and cancels the round. */
     fun stop() {
@@ -376,11 +406,12 @@ open class GameEngine(
         }
 
         // --- Phase transitions ---
+        // activePhaseStartMillis is fixed at (roundStartMillis + COUNTDOWN_MILLIS) and is
+        // never overwritten with `now`.  This keeps elapsed/remaining time derived from the
+        // same scheduled boundary in both COUNTDOWN and PLAYING, preventing a visible
+        // timer jump caused by tick-granularity jitter at the phase boundary.
         val newPhase = computePhase(now)
         if (newPhase != currentPhase) {
-            if (newPhase == RoundPhase.PLAYING) {
-                activePhaseStartMillis = now
-            }
             currentPhase = newPhase
         }
 
@@ -390,14 +421,14 @@ open class GameEngine(
         val tickResult: TickResult = when (currentPhase) {
             RoundPhase.PLAYING -> {
                 if (rules.isRoundOver(state, elapsed)) {
-                    currentPhase = RoundPhase.ROUND_OVER
+                    transitionToRoundOver()
                     TickResult(state, emptyList(), emptyMap())
                 } else {
                     val result = rules.onTick(state, inputs, now, setup)
                     engineState = result.state
                     // Check for round-over caused by the tick (e.g. survivor elimination)
                     if (rules.isRoundOver(result.state, elapsed)) {
-                        currentPhase = RoundPhase.ROUND_OVER
+                        transitionToRoundOver()
                     }
                     result
                 }
@@ -461,6 +492,18 @@ open class GameEngine(
     // ---------------------------------------------------------------------------
     // Helpers
     // ---------------------------------------------------------------------------
+
+    /**
+     * Transitions to [RoundPhase.ROUND_OVER] and completes [roundOverSignal].
+     *
+     * The signal completion happens *before* the snapshot is emitted so the session
+     * observer is guaranteed to see ROUND_OVER even if the tick loop is cancelled
+     * between this call and the [_snapshots] update (issue #66).
+     */
+    private fun transitionToRoundOver() {
+        currentPhase = RoundPhase.ROUND_OVER
+        _roundOverSignal.complete(Unit)
+    }
 
     private fun computePhase(nowMillis: Long): RoundPhase {
         if (currentPhase == RoundPhase.ROUND_OVER) return RoundPhase.ROUND_OVER

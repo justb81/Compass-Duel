@@ -62,8 +62,17 @@ class NearbyConnectionManager @Inject constructor(
     private val _transportErrors = MutableSharedFlow<TransportError>(extraBufferCapacity = BUFFER_CAPACITY)
     override val transportErrors: SharedFlow<TransportError> = _transportErrors.asSharedFlow()
 
-    /** Stores peer names captured in onConnectionInitiated so they can be emitted in onConnectionResult. */
-    private val pendingPeerNames: MutableMap<String, String> = mutableMapOf()
+    override var acceptNewConnections: Boolean = true
+
+    /**
+     * Stores peer names captured in onConnectionInitiated so they can be emitted in
+     * onConnectionResult.
+     *
+     * Accessed from Play Services callback threads (onConnectionInitiated, onConnectionResult,
+     * onDisconnected, stopAll), which may run concurrently. ConcurrentHashMap makes each
+     * individual put/remove/get atomic without requiring explicit locking (#61).
+     */
+    private val pendingPeerNames: MutableMap<String, String> = java.util.concurrent.ConcurrentHashMap()
 
     // ---------------------------------------------------------------------------
     // Callbacks
@@ -71,6 +80,10 @@ class NearbyConnectionManager @Inject constructor(
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            if (!acceptNewConnections) {
+                connectionsClient.rejectConnection(endpointId)
+                return
+            }
             // Store the peer name so it can be included in the Connected event
             pendingPeerNames[endpointId] = info.endpointName
             // Auto-accept — trusted local group in v1.

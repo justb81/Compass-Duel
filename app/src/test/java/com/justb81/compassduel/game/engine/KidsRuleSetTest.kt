@@ -121,6 +121,55 @@ class KidsRuleSetTest {
     }
 
     // ---------------------------------------------------------------------------
+    // Host-side toss cooldown (Issue #54)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `second toss within cooldown window is rejected even when target is not resting`() {
+        // Use a miss for the first toss so p2 does NOT enter a rest window.
+        // This isolates the toss cooldown on the actor side from the target-rest check.
+        val state = initialKidsState()
+        val missInputs = TickInputs(
+            continuousInputs = emptyMap(),
+            queuedActions = listOf(QueuedAction(1, PlayerAction.ATTACK, aimDegrees = 90f)), // aimed away
+        )
+        val hitInputs = TickInputs(
+            continuousInputs = emptyMap(),
+            queuedActions = listOf(QueuedAction(1, PlayerAction.ATTACK, aimDegrees = 180f)),
+        )
+        // First toss (miss) — sets the cooldown without catching p2
+        val afterMiss = rules.onTick(state, missInputs, now, setup)
+        val p1AfterMiss = (afterMiss.state as EngineState.Kids).players.first { it.id == 1 }
+        assertEquals(0, p1AfterMiss.stars) { "Miss should not award stars" }
+        assertTrue(p1AfterMiss.tossReadyAtMillis > now) { "Cooldown must be set even on a miss" }
+
+        // Second toss within the cooldown window, this time aimed at p2 (who is not resting).
+        // The host-side cooldown guard must block it — stars must stay at 0.
+        val withinCooldown = now + KidsRules.TOSS_COOLDOWN_MILLIS - 1L
+        val afterSecond = rules.onTick(afterMiss.state, hitInputs, withinCooldown, setup)
+        val p1AfterSecond = (afterSecond.state as EngineState.Kids).players.first { it.id == 1 }
+        assertEquals(0, p1AfterSecond.stars) { "Stars must remain 0 — toss rejected by cooldown" }
+    }
+
+    @Test
+    fun `toss is accepted again after cooldown window expires`() {
+        val state = initialKidsState()
+        val inputs = TickInputs(
+            continuousInputs = emptyMap(),
+            queuedActions = listOf(QueuedAction(1, PlayerAction.ATTACK, 180f)),
+        )
+        // First toss lands; p2 enters rest window
+        val afterFirst = rules.onTick(state, inputs, now, setup)
+
+        // Advance past both toss cooldown AND p2's rest window so the second toss can land
+        val afterCooldown = now + KidsRules.TOSS_COOLDOWN_MILLIS +
+            KidsRules.REST_AFTER_CAUGHT_MILLIS + 1L
+        val afterSecond = rules.onTick(afterFirst.state, inputs, afterCooldown, setup)
+        val p1Stars = (afterSecond.state as EngineState.Kids).players.first { it.id == 1 }.stars
+        assertEquals(KidsRules.STARS_PER_CATCH * 2, p1Stars) { "Second toss should land after cooldown" }
+    }
+
+    // ---------------------------------------------------------------------------
     // Sparkles thrown counter
     // ---------------------------------------------------------------------------
 

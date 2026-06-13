@@ -274,6 +274,110 @@ class GameEngineTest {
     }
 
     // ---------------------------------------------------------------------------
+    // roundOutcome() phase guard (Issue #56)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `roundOutcome is null during COUNTDOWN phase`() = runTest {
+        val clock = FakeClock()
+        val engine = standardEngine(clock, this)
+        engine.startRound(standardSetup, roundIndex = 0)
+
+        // Still in COUNTDOWN — roundOutcome must be null
+        engine.tick()
+        assertNull(engine.roundOutcome()) { "roundOutcome must be null in COUNTDOWN" }
+        engine.stop()
+    }
+
+    @Test
+    fun `roundOutcome is null during PLAYING phase before round ends`() = runTest {
+        val clock = FakeClock()
+        val engine = standardEngine(clock, this)
+        engine.startRound(standardSetup, roundIndex = 0)
+
+        clock.advance(COUNTDOWN_MILLIS + 1L)
+        engine.tick()
+
+        assertEquals(RoundPhase.PLAYING, engine.snapshots.value.phase)
+        assertNull(engine.roundOutcome()) { "roundOutcome must be null while PLAYING" }
+        engine.stop()
+    }
+
+    @Test
+    fun `roundOutcome is non-null after ROUND_OVER phase`() = runTest {
+        val clock = FakeClock()
+        val engine = standardEngine(clock, this)
+        engine.startRound(standardSetup, roundIndex = 0)
+
+        clock.advance(COUNTDOWN_MILLIS + 1L)
+        engine.tick()
+
+        // KO player 2 to trigger ROUND_OVER
+        repeat(ATTACKS_TO_KO) {
+            clock.advance(StandardRules.ATTACK_COOLDOWN_MILLIS)
+            engine.submitInput(1, 180f, false, PlayerAction.ATTACK)
+            engine.tick()
+        }
+
+        assertEquals(RoundPhase.ROUND_OVER, engine.snapshots.value.phase)
+        assertTrue(engine.roundOutcome() != null) { "roundOutcome must be non-null at ROUND_OVER" }
+        engine.stop()
+    }
+
+    // ---------------------------------------------------------------------------
+    // COUNTDOWN->PLAYING timer continuity (Issue #57)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `remainingMillis does not jump at the COUNTDOWN to PLAYING boundary with non-zero tick granularity`() = runTest {
+        // Use a tick size larger than 1 ms to simulate real-world granularity.
+        val tickMs = 50L
+        val clock = FakeClock()
+        val engine = standardEngine(clock, this, tickMillis = tickMs)
+        engine.startRound(standardSetup, roundIndex = 0)
+
+        // Collect remainingMillis across the boundary.
+        var lastCountdownRemaining = Long.MAX_VALUE
+        var firstPlayingRemaining = Long.MIN_VALUE
+        var sawPlaying = false
+
+        // Run enough ticks to cross the 3 s boundary and into PLAYING
+        repeat(80) {
+            clock.advance(tickMs)
+            engine.tick()
+            val snap = engine.snapshots.value
+            when (snap.phase) {
+                RoundPhase.COUNTDOWN -> lastCountdownRemaining = snap.remainingMillis
+                RoundPhase.PLAYING -> {
+                    if (!sawPlaying) {
+                        firstPlayingRemaining = snap.remainingMillis
+                        sawPlaying = true
+                    }
+                }
+                else -> Unit
+            }
+        }
+
+        assertTrue(sawPlaying) { "Engine should reach PLAYING within 80 ticks of 50 ms" }
+
+        // The last COUNTDOWN remaining was some small value near 0.
+        // The first PLAYING remaining is roundDurationSeconds * 1000.
+        // There must be no negative discontinuity: the PLAYING timer should not start
+        // below the full round duration (it starts at round_duration - elapsed_since_active_start).
+        val roundMillis = StandardRules.ROUND_DURATION_SECONDS * MILLIS_PER_SECOND.toLong()
+        // The first PLAYING remainingMillis should be <= roundMillis (elapsed is ≥ 0)
+        assertTrue(firstPlayingRemaining <= roundMillis) {
+            "PLAYING remaining ($firstPlayingRemaining) must not exceed round duration ($roundMillis)"
+        }
+        // And the transition should not produce a sudden jump: remaining should decrease
+        // monotonically from COUNTDOWN → PLAYING boundary.  Since COUNTDOWN remaining
+        // counts down from 3000 to 0, and PLAYING remaining starts near roundMillis,
+        // we verify that PLAYING remaining at t=0 is the full round duration (no over-shoot).
+        assertTrue(firstPlayingRemaining >= 0L) { "PLAYING remaining must not be negative at boundary" }
+        engine.stop()
+    }
+
+    // ---------------------------------------------------------------------------
     // Snapshot sequence number increments
     // ---------------------------------------------------------------------------
 

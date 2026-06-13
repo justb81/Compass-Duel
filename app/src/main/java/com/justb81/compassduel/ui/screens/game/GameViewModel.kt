@@ -164,13 +164,25 @@ class GameViewModel @Inject constructor(
     )
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
 
-    // Latest raw azimuth and pitch from the sensor (updated at sensor rate)
-    private var latestRawAzimuth = 0f
+    // Latest raw azimuth and pitch from the sensor (updated at sensor rate).
+    // Null until the first orientation sample has been received — used to prevent
+    // a stale/zero azimuth from being captured as the aim-calibration fallback (#69).
+    private var latestRawAzimuth: Float? = null
     private var latestPitch = 0f
 
     // Set once when COUNTDOWN transitions to PLAYING
     private var calibration: AimCalibration? = null
     private var pipelineStarted = false
+
+    // Whether a PLAYING snapshot arrived before the first sensor sample.
+    // When true the calibration will be captured on the first orientation reading
+    // instead of at the PLAYING-phase transition.
+    private var pendingCalibrationCapture = false
+
+    // Last known round-win counts from the previous round's RoundEnd message.
+    // Persisted here so the HUD can show accumulated wins during PLAYING, when
+    // session.roundEnd is null (it is cleared at round start).
+    private var lastKnownRoundWins: Map<Int, Int> = emptyMap()
 
     // Current calibrated aim for the compass ring
     private var calibratedAim = 0f
@@ -191,6 +203,7 @@ class GameViewModel @Inject constructor(
     init {
         observeSensors()
         observeSnapshot()
+        observeRoundEnd()
     }
 
     // -------------------------------------------------------------------------
@@ -202,15 +215,41 @@ class GameViewModel @Inject constructor(
             orientationSensor.samples().collect { sample ->
                 latestRawAzimuth = sample.azimuthDegrees
                 latestPitch = sample.pitchDegrees
+
+                // If the PLAYING snapshot arrived before this first orientation sample,
+                // capture the calibration now using the real azimuth (#69).
+                if (pendingCalibrationCapture) {
+                    pendingCalibrationCapture = false
+                    val lobby = session.lobby.value
+                    val mode = lobby?.mode ?: GameMode.STANDARD
+                    val myId = lobby?.yourPlayerId ?: return@collect
+                    // resolveCalibration always yields UseNow here because rawAzimuth != null.
+                    val decision = resolveCalibration(
+                        storedCal = calibrationStore.calibration.value,
+                        rawAzimuth = sample.azimuthDegrees,
+                    )
+                    val cal = (decision as CalibrationDecision.UseNow).calibration
+                    calibration = cal
+                    calibratedAim = cal.calibrate(sample.azimuthDegrees)
+                    pipelineStarted = true
+                    inputPipeline.start(
+                        scope = viewModelScope,
+                        playerId = myId,
+                        mode = mode,
+                        calibration = cal,
+                        onInput = session::submitLocalInput,
+                    )
+                }
+
                 val cal = calibration
                 if (cal != null) {
-                    calibratedAim = cal.calibrate(latestRawAzimuth)
+                    calibratedAim = cal.calibrate(sample.azimuthDegrees)
                 }
                 // Update the compass ring in real time during PLAYING
                 val current = _uiState.value
                 if (current is GameUiState.Playing) {
                     _uiState.value = current.copy(
-                        azimuthDegrees = latestRawAzimuth,
+                        azimuthDegrees = sample.azimuthDegrees,
                         debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
                     )
                 }
@@ -239,19 +278,34 @@ class GameViewModel @Inject constructor(
                     RoundPhase.PLAYING -> {
                         // Use the lobby-captured calibration if the player set one there;
                         // otherwise fall back to capturing the heading at the buzzer.
+                        // If no orientation sample has arrived yet, defer the fallback
+                        // capture until the first real reading (#69).
                         if (calibration == null && !pipelineStarted) {
-                            val cal = calibrationStore.calibration.value
-                                ?: AimCalibration(latestRawAzimuth)
-                            calibration = cal
-                            calibratedAim = cal.calibrate(latestRawAzimuth)
-                            pipelineStarted = true
-                            inputPipeline.start(
-                                scope = viewModelScope,
-                                playerId = myId,
-                                mode = mode,
-                                calibration = cal,
-                                onInput = session::submitLocalInput,
-                            )
+                            when (
+                                val decision = resolveCalibration(
+                                    storedCal = calibrationStore.calibration.value,
+                                    rawAzimuth = latestRawAzimuth,
+                                )
+                            ) {
+                                is CalibrationDecision.UseNow -> {
+                                    val cal = decision.calibration
+                                    calibration = cal
+                                    calibratedAim = cal.calibrate(latestRawAzimuth ?: 0f)
+                                    pipelineStarted = true
+                                    inputPipeline.start(
+                                        scope = viewModelScope,
+                                        playerId = myId,
+                                        mode = mode,
+                                        calibration = cal,
+                                        onInput = session::submitLocalInput,
+                                    )
+                                }
+                                CalibrationDecision.Defer -> {
+                                    // No lobby calibration and no sensor sample yet —
+                                    // defer capture until the first orientation reading.
+                                    pendingCalibrationCapture = true
+                                }
+                            }
                         }
                         // Dispatch haptics for new events
                         if (snapshot.seq != lastHapticSeq) {
@@ -263,7 +317,36 @@ class GameViewModel @Inject constructor(
                     RoundPhase.ROUND_OVER -> {
                         stopPipeline()
                         lastStatus = PlayerStatus.IDLE
+                        calibration = null
+                        pendingCalibrationCapture = false
+                        latestRawAzimuth = null
                         _uiState.value = GameUiState.RoundOver
+                    }
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Round-end observation (match score accumulation)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Observes [GameSession.roundEnd] to cache the latest match score so the
+     * round-win HUD in [GameUiState.Playing] can show accumulated wins across rounds
+     * (#75). [GameSession.roundEnd] is null during PLAYING (cleared at round start),
+     * so the ViewModel keeps the last non-null match score locally.
+     */
+    private fun observeRoundEnd() {
+        viewModelScope.launch {
+            session.roundEnd.collect { roundEnd ->
+                val score = roundEnd?.matchScore
+                if (score != null && score.isNotEmpty()) {
+                    lastKnownRoundWins = score
+                    // Keep the live Playing state in sync so the HUD updates immediately.
+                    val current = _uiState.value
+                    if (current is GameUiState.Playing) {
+                        _uiState.value = current.copy(roundWins = score)
                     }
                 }
             }
@@ -319,9 +402,9 @@ class GameViewModel @Inject constructor(
             myStatus = mySnap?.status?.name ?: PlayerStatus.IDLE.name,
             isEliminated = mySnap?.status == PlayerStatus.ELIMINATED,
             compassTargets = compassTargets,
-            azimuthDegrees = latestRawAzimuth,
+            azimuthDegrees = latestRawAzimuth ?: 0f,
             remainingMillis = snapshot.remainingMillis,
-            roundWins = emptyMap(),
+            roundWins = lastKnownRoundWins,
             maxRoundWins = StandardRules.ROUNDS_TO_WIN,
             warningActive = warningActive,
             opponents = opponents,
@@ -572,5 +655,41 @@ class GameViewModel @Inject constructor(
             androidx.compose.ui.graphics.Color(0xFF1E88E5), // Blue
             androidx.compose.ui.graphics.Color(0xFF43A047), // Green
         )
+
+        /**
+         * Resolves which [AimCalibration] to use when transitioning to PLAYING, or
+         * signals that the capture must be deferred (#69).
+         *
+         * Decision rules:
+         * 1. If a lobby-captured calibration exists ([storedCal] != null), use it
+         *    immediately — no sensor sample is needed.
+         * 2. If no lobby calibration exists but a real sensor reading is available
+         *    ([rawAzimuth] != null), create a new calibration from that reading.
+         * 3. If neither is available, return [CalibrationDecision.Defer] so the
+         *    caller can set a flag and retry on the first real orientation sample.
+         *
+         * @param storedCal The lobby-captured calibration from [AimCalibrationStore], or null.
+         * @param rawAzimuth The latest raw azimuth from [OrientationSensor], or null when
+         *   no sample has been received yet.
+         * @return [CalibrationDecision.UseNow] with the resolved calibration, or
+         *   [CalibrationDecision.Defer] when the capture must wait for a real reading.
+         */
+        internal fun resolveCalibration(
+            storedCal: AimCalibration?,
+            rawAzimuth: Float?,
+        ): CalibrationDecision = when {
+            storedCal != null -> CalibrationDecision.UseNow(storedCal)
+            rawAzimuth != null -> CalibrationDecision.UseNow(AimCalibration(rawAzimuth))
+            else -> CalibrationDecision.Defer
+        }
+    }
+
+    /** Result of [resolveCalibration]. */
+    internal sealed interface CalibrationDecision {
+        /** Use [calibration] immediately — pipeline can start now. */
+        data class UseNow(val calibration: AimCalibration) : CalibrationDecision
+
+        /** No real sensor reading available yet — defer until first orientation sample. */
+        data object Defer : CalibrationDecision
     }
 }
