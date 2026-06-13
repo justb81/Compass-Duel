@@ -20,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -133,7 +134,13 @@ private fun StandardResults(state: ResultsUiState) {
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
                 Text(text = entry.name)
-                Text(text = stringResource(R.string.results_wins_count, entry.roundWins))
+                Text(
+                    text = pluralStringResource(
+                        R.plurals.results_wins_count,
+                        entry.roundWins,
+                        entry.roundWins,
+                    ),
+                )
             }
         }
     }
