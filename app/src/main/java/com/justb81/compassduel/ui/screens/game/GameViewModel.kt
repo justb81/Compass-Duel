@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.justb81.compassduel.BuildConfig
 import com.justb81.compassduel.game.Bearing
+import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.game.Position
 import com.justb81.compassduel.game.kids.KidsRules
 import com.justb81.compassduel.game.standard.StandardRules
@@ -307,24 +308,7 @@ class GameViewModel @Inject constructor(
         }
 
         val myStatus = mySnap?.status ?: PlayerStatus.IDLE
-        val effectKind = computeActionEffectKind(snapshot.events, myStatus, myId, mode)
-        val effectElement = if (mode == GameMode.STANDARD) myLobby?.element else null
-        val newEffect = effectKind?.let { kind ->
-            actionEffectTrigger += 1
-            ActionEffect(kind = kind, element = effectElement, triggerId = actionEffectTrigger)
-        }
-        val existingEffect = (_uiState.value as? GameUiState.Playing)?.actionEffect
-        val resolvedEffect = newEffect ?: existingEffect
-
-        if (newEffect != null) {
-            viewModelScope.launch {
-                delay(ACTION_EFFECT_DURATION_MILLIS)
-                val s = _uiState.value
-                if (s is GameUiState.Playing && s.actionEffect == newEffect) {
-                    _uiState.value = s.copy(actionEffect = null)
-                }
-            }
-        }
+        val resolvedEffect = resolveActionEffect(snapshot, myStatus, myId, mode, myLobby?.element)
 
         return GameUiState.Playing(
             mode = mode,
@@ -493,23 +477,59 @@ class GameViewModel @Inject constructor(
         val justStartedAttacking = myStatus == PlayerStatus.ATTACKING && lastStatus != PlayerStatus.ATTACKING
         lastStatus = myStatus
 
-        val fromEvents = events.firstNotNullOfOrNull { event ->
-            when {
-                mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.actorId == myId ->
-                    ActionEffectKind.IMPACT_LANDED
-                mode == GameMode.STANDARD && event.type == GameEventType.BLOCKED && event.actorId == myId ->
-                    ActionEffectKind.IMPACT_BLOCKED
-                mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.targetId == myId ->
-                    ActionEffectKind.DAMAGE_TAKEN
-                mode == GameMode.KIDS && event.type == GameEventType.CAUGHT && event.actorId == myId ->
-                    ActionEffectKind.IMPACT_LANDED
-                mode == GameMode.KIDS && event.type == GameEventType.BUBBLED && event.targetId == myId ->
-                    ActionEffectKind.IMPACT_BLOCKED
-                else -> null
-            }
-        }
+        val fromEvents = events.firstNotNullOfOrNull { eventToEffectKind(it, myId, mode) }
         // Impacts win over the launch effect within the same snapshot.
         return fromEvents ?: if (justStartedAttacking) ActionEffectKind.PROJECTILE_FIRED else null
+    }
+
+    /**
+     * Resolves the transient action effect for the current snapshot and schedules
+     * it to clear after [ACTION_EFFECT_DURATION_MILLIS]; falls back to the effect
+     * already showing when no new one fires. [rawElement] themes Standard-Mode
+     * effects and is ignored in Kids Mode.
+     */
+    private fun resolveActionEffect(
+        snapshot: GameSnapshot,
+        myStatus: PlayerStatus,
+        myId: Int,
+        mode: GameMode,
+        rawElement: Element?,
+    ): ActionEffect? {
+        val effectKind = computeActionEffectKind(snapshot.events, myStatus, myId, mode)
+        val element = if (mode == GameMode.STANDARD) rawElement else null
+        val newEffect = effectKind?.let { kind ->
+            actionEffectTrigger += 1
+            ActionEffect(kind = kind, element = element, triggerId = actionEffectTrigger)
+        }
+        if (newEffect != null) {
+            viewModelScope.launch {
+                delay(ACTION_EFFECT_DURATION_MILLIS)
+                val s = _uiState.value
+                if (s is GameUiState.Playing && s.actionEffect == newEffect) {
+                    _uiState.value = s.copy(actionEffect = null)
+                }
+            }
+        }
+        return newEffect ?: (_uiState.value as? GameUiState.Playing)?.actionEffect
+    }
+
+    /** Maps a single host [GameEvent] to the effect it should play for the local player, or null. */
+    private fun eventToEffectKind(
+        event: com.justb81.compassduel.net.protocol.GameEvent,
+        myId: Int,
+        mode: GameMode,
+    ): ActionEffectKind? = when {
+        mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.actorId == myId ->
+            ActionEffectKind.IMPACT_LANDED
+        mode == GameMode.STANDARD && event.type == GameEventType.BLOCKED && event.actorId == myId ->
+            ActionEffectKind.IMPACT_BLOCKED
+        mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.targetId == myId ->
+            ActionEffectKind.DAMAGE_TAKEN
+        mode == GameMode.KIDS && event.type == GameEventType.CAUGHT && event.actorId == myId ->
+            ActionEffectKind.IMPACT_LANDED
+        mode == GameMode.KIDS && event.type == GameEventType.BUBBLED && event.targetId == myId ->
+            ActionEffectKind.IMPACT_BLOCKED
+        else -> null
     }
 
     // -------------------------------------------------------------------------

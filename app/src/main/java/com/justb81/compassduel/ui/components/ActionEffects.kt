@@ -142,10 +142,10 @@ private fun androidx.compose.animation.core.InfiniteTransition.animateFloatLoopi
 private fun palette(mode: GameMode, element: Element?): EffectPalette = when (mode) {
     GameMode.KIDS -> EffectPalette(KIDS_PRIMARY, KIDS_ACCENT)
     GameMode.STANDARD -> when (element) {
-        Element.FIRE -> EffectPalette(Color(0xFFFF7043), Color(0xFFFFCA28))
-        Element.WATER -> EffectPalette(Color(0xFF29B6F6), Color(0xFFB3E5FC))
-        Element.EARTH -> EffectPalette(Color(0xFF66BB6A), Color(0xFFC5E1A5))
-        Element.LIGHTNING -> EffectPalette(Color(0xFFFFEE58), Color(0xFFFFF59D))
+        Element.FIRE -> EffectPalette(FIRE_PRIMARY, FIRE_ACCENT)
+        Element.WATER -> EffectPalette(WATER_PRIMARY, WATER_ACCENT)
+        Element.EARTH -> EffectPalette(EARTH_PRIMARY, EARTH_ACCENT)
+        Element.LIGHTNING -> EffectPalette(LIGHTNING_PRIMARY, LIGHTNING_ACCENT)
         null -> EffectPalette(Color.White, Color.LightGray)
     }
 }
@@ -364,3 +364,13 @@ private const val DODGE_ALPHA = 0.7f
 private const val SPARKLE_STROKE_DP = 2f
 private val KIDS_PRIMARY = Color(0xFFFFD54F)
 private val KIDS_ACCENT = Color(0xFFFFF8E1)
+
+// Standard-Mode element combat colours (primary, accent).
+private val FIRE_PRIMARY = Color(0xFFFF7043)
+private val FIRE_ACCENT = Color(0xFFFFCA28)
+private val WATER_PRIMARY = Color(0xFF29B6F6)
+private val WATER_ACCENT = Color(0xFFB3E5FC)
+private val EARTH_PRIMARY = Color(0xFF66BB6A)
+private val EARTH_ACCENT = Color(0xFFC5E1A5)
+private val LIGHTNING_PRIMARY = Color(0xFFFFEE58)
+private val LIGHTNING_ACCENT = Color(0xFFFFF59D)

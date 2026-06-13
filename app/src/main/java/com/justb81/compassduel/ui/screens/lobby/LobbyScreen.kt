@@ -214,6 +214,7 @@ private fun DiscoveredHostRow(
 }
 
 @OptIn(ExperimentalLayoutApi::class)
+@Suppress("LongParameterList")
 @Composable
 private fun LobbyContent(
     uiState: LobbyUiState,
