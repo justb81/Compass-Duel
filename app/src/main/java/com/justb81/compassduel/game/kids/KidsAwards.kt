@@ -1,10 +1,13 @@
 package com.justb81.compassduel.game.kids
 
+import kotlinx.serialization.Serializable
+
 /**
  * End-of-round awards for Kids Mode. There is no "winner vs. losers" screen:
  * every player receives exactly one award, and the fallback award is a
  * cheerful participation badge rather than a ranking.
  */
+@Serializable
 enum class KidsAward {
 
     /** Most stars collected this round. */
@@ -21,6 +24,7 @@ enum class KidsAward {
 }
 
 /** Per-player counters the host accumulates over one Kids Mode round. */
+@Serializable
 data class KidsRoundStats(
     val playerId: Int,
     val stars: Int,

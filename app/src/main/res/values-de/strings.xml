@@ -1,4 +1,97 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Compass Duel</string>
+
+    <!-- Nearby runtime-permission gate -->
+    <string name="permissions_rationale">Compass Duel benötigt Bluetooth- und WLAN-Berechtigungen, um Mitspieler in der Nähe zu finden und zu verbinden.</string>
+    <string name="permissions_denied_message">Berechtigungen wurden verweigert. Bitte öffne die App-Einstellungen und erteile Bluetooth- und WLAN-Zugriff.</string>
+    <string name="permissions_grant_button">Berechtigungen erteilen</string>
+    <string name="permissions_open_settings">Einstellungen öffnen</string>
+
+    <!-- Home screen -->
+    <string name="home_player_name_label">Dein Name</string>
+    <string name="home_mode_standard">Standard</string>
+    <string name="home_mode_kids">Sternenfänger</string>
+    <string name="home_host_game">Spiel hosten</string>
+    <string name="home_join_game">Spiel beitreten</string>
+
+    <!-- Peer-lost dialog -->
+    <string name="peer_lost_title">Verbindung unterbrochen</string>
+    <string name="peer_lost_message">Die Verbindung zum anderen Gerät wurde unterbrochen. Du wurdest zum Startbildschirm zurückgeleitet.</string>
+    <string name="peer_lost_ok">OK</string>
+
+    <!-- Screen placeholders -->
+    <string name="placeholder_game_screen">Spielbildschirm — kommt bald</string>
+    <string name="placeholder_results_screen">Ergebnisbildschirm — kommt bald</string>
+
+    <!-- Lobby screen — shared -->
+    <string name="lobby_title_host">Lobby (Host)</string>
+    <string name="lobby_title_client">Lobby</string>
+    <string name="lobby_players_header">Spieler</string>
+    <string name="lobby_mode_label">Spielmodus</string>
+    <string name="lobby_seat_header">Platz wählen</string>
+    <string name="lobby_character_header">Charakter wählen</string>
+    <string name="lobby_start_button">Spiel starten</string>
+    <string name="lobby_waiting_for_host">Warte auf den Host …</string>
+    <string name="lobby_start_error_players">Es werden 2–4 Spieler benötigt.</string>
+    <string name="lobby_start_error_seats">Alle Spieler müssen einen Platz wählen.</string>
+    <string name="lobby_start_error_elements">Alle Spieler müssen ein Element wählen.</string>
+    <string name="lobby_start_error_duplicate_seats">Zwei Spieler können nicht denselben Platz wählen.</string>
+    <string name="lobby_start_error_duplicate_elements">Jeder Spieler muss ein anderes Element wählen.</string>
+
+    <!-- Lobby — client discovery -->
+    <string name="lobby_searching">Suche nach Hosts in der Nähe …</string>
+    <string name="lobby_no_hosts_found">Noch kein Host gefunden. Stelle sicher, dass der Host ein Spiel gestartet hat.</string>
+    <string name="lobby_connect_button">Verbinden</string>
+    <string name="lobby_connected_waiting">Verbunden — warte auf Lobby …</string>
+
+    <!-- Seat grid -->
+    <string name="seat_grid_cell_content_description">Platz %1$d</string>
+    <string name="seat_grid_cell_occupied">Platz %1$d — %2$s</string>
+    <string name="seat_grid_cell_mine">Platz %1$d — du</string>
+
+    <!-- Element picker (Standard mode) -->
+    <string name="element_fire">Feuer</string>
+    <string name="element_water">Wasser</string>
+    <string name="element_earth">Erde</string>
+    <string name="element_lightning">Blitz</string>
+
+    <!-- Sprite picker (Kids mode) -->
+    <string name="sprite_0">Stern</string>
+    <string name="sprite_1">Mond</string>
+    <string name="sprite_2">Sonne</string>
+    <string name="sprite_3">Komet</string>
+
+    <!-- Player badge -->
+    <string name="player_badge_ready">Bereit</string>
+    <string name="player_badge_not_ready">Nicht bereit</string>
+    <string name="player_badge_seat">Platz %1$d</string>
+    <string name="player_badge_no_seat">Kein Platz</string>
+
+    <!-- Game screen -->
+    <string name="game_countdown_instruction">Halte dein Handy flach und zeige nach vorne</string>
+    <string name="game_round_over">Runde beendet …</string>
+    <string name="game_status_shielding">Schild aktiv</string>
+    <string name="game_status_resting">Ausruhen …</string>
+    <string name="game_status_eliminated">Ausgeschieden – zuschauen</string>
+    <string name="game_status_ready">Bereit</string>
+    <string name="game_eliminated_spectating">Du wurdest ausgeschieden.\nBeobachte die verbleibenden Spieler.</string>
+    <string name="game_timer_label">%1$ds</string>
+    <string name="game_round_wins">Siege: %1$d</string>
+
+    <!-- Results screen -->
+    <string name="results_title">Rundenergebnis</string>
+    <string name="results_round_winner">%1$s gewinnt die Runde!</string>
+    <string name="results_round_draw">Unentschieden!</string>
+    <string name="results_match_winner">🏆 %1$s gewinnt das Match!</string>
+    <string name="results_scores_header">Match-Punktestand</string>
+    <string name="results_wins_count">%1$d Sieg(e)</string>
+    <string name="results_kids_celebration">Tolle Runde, alle! 🌟</string>
+    <string name="results_award_star_champion">Sternen-Champion</string>
+    <string name="results_award_bubble_hero">Blasen-Held</string>
+    <string name="results_award_busy_bee">Fleißige Biene</string>
+    <string name="results_award_super_sparkler">Super-Funkler</string>
+    <string name="results_rematch_button">Revanche</string>
+    <string name="results_leave_button">Verlassen</string>
+    <string name="results_waiting_for_host">Warte auf den Host für eine Revanche …</string>
 </resources>

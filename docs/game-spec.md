@@ -410,3 +410,53 @@ Compass Duel combines **physical interaction** (compass orientation, tilt gestur
 13. [Remapping sensor coordinates](https://stackoverflow.com/questions/10918948/remapping-sensor-coordinates/17813154) - What I want to happen, is to remap the coordinate system, when the phone is turned away from it's "n...
 
 14. [How to Calibrate the Compass on Android to Improve Device](https://smartupworld.com/how-to-calibrate-the-compass-on-android-to-improve-device/) - Modern Android smartphones come equipped with a variety of sensors, one of which is the magnetometer...
+
+---
+
+## v1 Implementation Notes
+
+This section documents deviations and design decisions from the spec above that
+were made during the v1 implementation (see `app/src/main/java/com/justb81/compassduel/`).
+
+### Attack cooldown replaces cross-device timestamp freshness
+
+The spec (§Hit Detection, footnote 3) requires the host to reject attack inputs
+that arrive more than 200 ms after the gesture timestamp. Because device clocks
+are not synchronised across phones, comparing `clientTimeMillis` to the host's
+clock is unreliable. Instead, v1 enforces a **700 ms per-player attack cooldown**
+on the host (`StandardRules.ATTACK_COOLDOWN_MILLIS`). The `clientTimeMillis` field
+is included in the payload for diagnostics only and is never used for timing
+decisions.
+
+### Special attack deferred
+
+The `SPECIAL` action is reserved in the `PlayerAction` enum and the payload schema
+(`net/protocol/Messages.kt`), but the host `StandardRuleSet` treats it as `IDLE` in
+v1. The double-shake gesture is not yet detected by `GestureClassifier`.
+
+### 3–4 player shield interception deferred
+
+The spec §Special Rules describes a shield-interception rule where a shielding
+player absorbs attacks that cross through their position toward another player.
+This is not implemented in v1; only the direct attacker–target pair is evaluated.
+
+### Calibration — Mode A extended with client-local facing capture
+
+v1 uses Mode A (seat grid) for position, extended with a 3-second client-local
+facing capture at round start (the COUNTDOWN phase). During the countdown each
+device records its raw azimuth as `facingOffsetDegrees` in `AimCalibration`. From
+that point all aim values sent to the host are calibrated: `aim = azimuth − offset`.
+This compensates for room orientation without requiring a shared absolute reference.
+
+### Standard-mode 90 s timeout outcome
+
+When the 90-second timer expires with more than one player still alive, the player
+with the highest HP wins the round. If two or more players are exactly tied on HP
+at timeout, the round is scored as a draw (no round win awarded to either).
+
+### Payload schema location
+
+All Nearby Connections message types are defined as a sealed `NetMessage` hierarchy
+in `net/protocol/Messages.kt`. The JSON discriminator field is `"type"` (via
+`@SerialName`). No version negotiation — updating the schema requires updating all
+producers and consumers in the same commit.

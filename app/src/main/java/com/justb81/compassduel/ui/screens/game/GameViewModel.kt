@@ -1,0 +1,461 @@
+package com.justb81.compassduel.ui.screens.game
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.justb81.compassduel.BuildConfig
+import com.justb81.compassduel.game.Bearing
+import com.justb81.compassduel.game.Position
+import com.justb81.compassduel.game.kids.KidsRules
+import com.justb81.compassduel.game.standard.StandardRules
+import com.justb81.compassduel.haptics.HapticFeedback
+import com.justb81.compassduel.net.protocol.GameEventType
+import com.justb81.compassduel.net.protocol.GameMode
+import com.justb81.compassduel.net.protocol.GameSnapshot
+import com.justb81.compassduel.net.protocol.LobbyPlayer
+import com.justb81.compassduel.net.protocol.PlayerStatus
+import com.justb81.compassduel.net.protocol.RoundPhase
+import com.justb81.compassduel.sensor.AimCalibration
+import com.justb81.compassduel.sensor.InputPipeline
+import com.justb81.compassduel.sensor.OrientationSensor
+import com.justb81.compassduel.session.GameSession
+import com.justb81.compassduel.ui.components.CompassTarget
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+// ---------------------------------------------------------------------------
+// UI state
+// ---------------------------------------------------------------------------
+
+/** Per-player HUD data derived from [GameSnapshot] for display in the game screen. */
+data class OpponentUiModel(
+    val id: Int,
+    val name: String,
+    val hp: Int,
+    val stars: Int,
+    val isEliminated: Boolean,
+)
+
+/**
+ * Sealed UI state for the game screen.
+ *
+ * The screen renders a different layout for each phase:
+ * - [Countdown]: facing-capture overlay with counter.
+ * - [Playing]: HUD + CompassRing + status line.
+ * - [RoundOver]: brief "round ended" overlay (navigation to Results is handled
+ *   by the nav graph via [SessionEvent.MatchOver]).
+ */
+sealed interface GameUiState {
+
+    /**
+     * COUNTDOWN phase — players capture their facing offset.
+     *
+     * @param secondsLeft Whole seconds remaining in the countdown.
+     */
+    data class Countdown(val secondsLeft: Int) : GameUiState
+
+    /**
+     * PLAYING phase — active combat / star-catching.
+     *
+     * @param mode Game mode (STANDARD or KIDS).
+     * @param myHp Local player HP (Standard only; 0 in Kids).
+     * @param myStars Local player star count (Kids only; 0 in Standard).
+     * @param myElement Element emoji+name label (Standard only; null in Kids).
+     * @param mySpriteEmoji Sprite emoji (Kids only; null in Standard).
+     * @param myStatus Name of the local player's [com.justb81.compassduel.net.protocol.PlayerStatus].
+     * @param isEliminated True when the local player has been eliminated (Standard only).
+     * @param compassTargets Opponent dots for the [com.justb81.compassduel.ui.components.CompassRing].
+     * @param azimuthDegrees Local player's raw azimuth at sensor rate.
+     * @param remainingMillis Milliseconds remaining in the round.
+     * @param roundWins Round-win counts per player id (Standard only).
+     * @param maxRoundWins Maximum round wins needed to win the match.
+     * @param warningActive True when at least one opponent has us in their aim cone.
+     * @param opponents Opponents for the HUD list.
+     * @param flashEvent Transient overlay flash; null when no flash is active.
+     * @param restingUntilMillis Epoch millis until which the local player is resting (Kids).
+     * @param debugAimDegrees Calibrated aim in debug builds; null in release.
+     */
+    @Suppress("LongParameterList")
+    data class Playing(
+        val mode: GameMode,
+        val myHp: Int,
+        val myStars: Int,
+        val myElement: String?,
+        val mySpriteEmoji: String?,
+        val myStatus: String,
+        val isEliminated: Boolean,
+        val compassTargets: List<CompassTarget>,
+        val azimuthDegrees: Float,
+        val remainingMillis: Long,
+        val roundWins: Map<Int, Int>,
+        val maxRoundWins: Int,
+        val warningActive: Boolean,
+        val opponents: List<OpponentUiModel>,
+        val flashEvent: FlashEvent?,
+        val restingUntilMillis: Long,
+        val debugAimDegrees: Float?,
+    ) : GameUiState
+
+    /** ROUND_OVER phase — match-over navigation is handled by the nav graph. */
+    data object RoundOver : GameUiState
+}
+
+/**
+ * Transient overlay flash event for game screen feedback.
+ *
+ * [GREEN] = attack landed / sparkle caught (positive).
+ * [RED] = damage received (Standard only — never used in Kids Mode).
+ * [TWINKLE] = catch or bubble event (Kids Mode, soft yellow).
+ */
+enum class FlashEvent { GREEN, RED, TWINKLE }
+
+// ---------------------------------------------------------------------------
+// ViewModel
+// ---------------------------------------------------------------------------
+
+/**
+ * ViewModel for the game screen.
+ *
+ * Combines the host-authoritative [GameSnapshot] with local sensor data so the
+ * [com.justb81.compassduel.ui.components.CompassRing] updates at full sensor rate
+ * while game logic stays at 10 Hz.
+ *
+ * ### Calibration flow
+ * During [RoundPhase.COUNTDOWN] the ViewModel samples the raw azimuth from
+ * [OrientationSensor]. When the phase transitions to [RoundPhase.PLAYING] it
+ * captures the latest azimuth as [AimCalibration.facingOffsetDegrees] and starts
+ * [InputPipeline] with the result.
+ *
+ * ### Haptic dispatch
+ * [GameSnapshot.events] from each new snapshot are scanned and mapped to
+ * [HapticFeedback] calls, branching on mode so Kids Mode never receives
+ * long buzzes or elimination patterns.
+ */
+@HiltViewModel
+class GameViewModel @Inject constructor(
+    private val session: GameSession,
+    private val orientationSensor: OrientationSensor,
+    private val inputPipeline: InputPipeline,
+    private val hapticFeedback: HapticFeedback,
+) : ViewModel() {
+
+    private val _uiState = MutableStateFlow<GameUiState>(GameUiState.Countdown(secondsLeft = INITIAL_COUNTDOWN_SECONDS))
+    val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
+
+    // Latest raw azimuth and pitch from the sensor (updated at sensor rate)
+    private var latestRawAzimuth = 0f
+    private var latestPitch = 0f
+
+    // Set once when COUNTDOWN transitions to PLAYING
+    private var calibration: AimCalibration? = null
+    private var pipelineStarted = false
+
+    // Current calibrated aim for the compass ring
+    private var calibratedAim = 0f
+
+    // Last processed snapshot sequence number (to avoid re-processing haptics)
+    private var lastHapticSeq = -1
+
+    init {
+        observeSensors()
+        observeSnapshot()
+    }
+
+    // -------------------------------------------------------------------------
+    // Sensor observation
+    // -------------------------------------------------------------------------
+
+    private fun observeSensors() {
+        viewModelScope.launch {
+            orientationSensor.samples().collect { sample ->
+                latestRawAzimuth = sample.azimuthDegrees
+                latestPitch = sample.pitchDegrees
+                val cal = calibration
+                if (cal != null) {
+                    calibratedAim = cal.calibrate(latestRawAzimuth)
+                }
+                // Update the compass ring in real time during PLAYING
+                val current = _uiState.value
+                if (current is GameUiState.Playing) {
+                    _uiState.value = current.copy(
+                        azimuthDegrees = latestRawAzimuth,
+                        debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
+                    )
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Snapshot observation
+    // -------------------------------------------------------------------------
+
+    private fun observeSnapshot() {
+        viewModelScope.launch {
+            session.snapshot.collectLatest { snapshot ->
+                if (snapshot == null) return@collectLatest
+                val lobby = session.lobby.value ?: return@collectLatest
+                val mode = lobby.mode
+                val myId = lobby.yourPlayerId
+                val players = lobby.players
+
+                when (snapshot.phase) {
+                    RoundPhase.COUNTDOWN -> {
+                        val secondsLeft = (snapshot.remainingMillis / MILLIS_PER_SECOND).toInt()
+                        _uiState.value = GameUiState.Countdown(secondsLeft)
+                    }
+                    RoundPhase.PLAYING -> {
+                        // Capture facing offset once on transition
+                        if (calibration == null && !pipelineStarted) {
+                            val offset = latestRawAzimuth
+                            val cal = AimCalibration(offset)
+                            calibration = cal
+                            calibratedAim = cal.calibrate(latestRawAzimuth)
+                            pipelineStarted = true
+                            inputPipeline.start(
+                                scope = viewModelScope,
+                                playerId = myId,
+                                mode = mode,
+                                calibration = cal,
+                                onInput = session::submitLocalInput,
+                            )
+                        }
+                        // Dispatch haptics for new events
+                        if (snapshot.seq != lastHapticSeq) {
+                            lastHapticSeq = snapshot.seq
+                            dispatchHaptics(snapshot, myId, mode)
+                        }
+                        _uiState.value = buildPlayingState(snapshot, players, mode, myId)
+                    }
+                    RoundPhase.ROUND_OVER -> {
+                        stopPipeline()
+                        _uiState.value = GameUiState.RoundOver
+                    }
+                }
+            }
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // UI state builder
+    // -------------------------------------------------------------------------
+
+    private fun buildPlayingState(
+        snapshot: GameSnapshot,
+        lobbyPlayers: List<LobbyPlayer>,
+        mode: GameMode,
+        myId: Int,
+    ): GameUiState.Playing {
+        val mySnap = snapshot.players.firstOrNull { it.id == myId }
+        val myLobby = lobbyPlayers.firstOrNull { it.id == myId }
+        val myCell = myLobby?.seatCell ?: 0
+        val myPos = Position(x = (myCell % GRID_COLUMNS).toFloat(), y = (myCell / GRID_COLUMNS).toFloat())
+        val tolerance = if (mode == GameMode.KIDS) KidsRules.AIM_TOLERANCE_DEGREES else Bearing.DEFAULT_TOLERANCE_DEGREES
+
+        val compassTargets = buildCompassTargets(snapshot, lobbyPlayers, myId, myPos, tolerance)
+        val opponents = buildOpponents(snapshot, lobbyPlayers, myId)
+        val warningActive = snapshot.players.any { it.id != myId && it.targetId == myId }
+
+        val myElement = if (mode == GameMode.STANDARD) myLobby?.element?.name?.let { ELEMENT_EMOJIS[it] } else null
+        val mySpriteEmoji = if (mode == GameMode.KIDS) myLobby?.spriteId?.let { SPRITE_EMOJIS.getOrNull(it) } else null
+
+        val flash = computeFlash(snapshot.events, myId, mode)
+        val existingFlash = (_uiState.value as? GameUiState.Playing)?.flashEvent
+        val resolvedFlash = flash ?: existingFlash
+
+        if (flash != null) {
+            viewModelScope.launch {
+                delay(FLASH_DURATION_MILLIS)
+                val s = _uiState.value
+                if (s is GameUiState.Playing && s.flashEvent == flash) {
+                    _uiState.value = s.copy(flashEvent = null)
+                }
+            }
+        }
+
+        return GameUiState.Playing(
+            mode = mode,
+            myHp = mySnap?.hp ?: StandardRules.MAX_HP,
+            myStars = mySnap?.stars ?: 0,
+            myElement = myElement,
+            mySpriteEmoji = mySpriteEmoji,
+            myStatus = mySnap?.status?.name ?: PlayerStatus.IDLE.name,
+            isEliminated = mySnap?.status == PlayerStatus.ELIMINATED,
+            compassTargets = compassTargets,
+            azimuthDegrees = latestRawAzimuth,
+            remainingMillis = snapshot.remainingMillis,
+            roundWins = emptyMap(),
+            maxRoundWins = StandardRules.ROUNDS_TO_WIN,
+            warningActive = warningActive,
+            opponents = opponents,
+            flashEvent = resolvedFlash,
+            restingUntilMillis = mySnap?.restingUntilMillis ?: 0L,
+            debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
+        )
+    }
+
+    private fun buildCompassTargets(
+        snapshot: GameSnapshot,
+        lobbyPlayers: List<LobbyPlayer>,
+        myId: Int,
+        myPos: Position,
+        tolerance: Float,
+    ): List<CompassTarget> = snapshot.players
+        .filter { it.id != myId }
+        .mapIndexedNotNull { index, playerSnap ->
+            val opponentLobby = lobbyPlayers.firstOrNull { it.id == playerSnap.id } ?: return@mapIndexedNotNull null
+            val cell = opponentLobby.seatCell ?: return@mapIndexedNotNull null
+            val opponentPos = Position(x = (cell % GRID_COLUMNS).toFloat(), y = (cell / GRID_COLUMNS).toFloat())
+            val bearing = Bearing.calculate(myPos, opponentPos)
+            val onTarget = Bearing.isOnTarget(calibratedAim, bearing, tolerance)
+            CompassTarget(
+                id = playerSnap.id,
+                name = opponentLobby.name,
+                color = OPPONENT_COLORS[index % OPPONENT_COLORS.size],
+                bearingDegrees = bearing,
+                onTarget = onTarget,
+            )
+        }
+
+    private fun buildOpponents(
+        snapshot: GameSnapshot,
+        lobbyPlayers: List<LobbyPlayer>,
+        myId: Int,
+    ): List<OpponentUiModel> = snapshot.players
+        .filter { it.id != myId }
+        .mapNotNull { ps ->
+            val lp = lobbyPlayers.firstOrNull { it.id == ps.id } ?: return@mapNotNull null
+            OpponentUiModel(
+                id = ps.id,
+                name = lp.name,
+                hp = ps.hp,
+                stars = ps.stars,
+                isEliminated = ps.status == PlayerStatus.ELIMINATED,
+            )
+        }
+
+    // -------------------------------------------------------------------------
+    // Haptic dispatch
+    // -------------------------------------------------------------------------
+
+    private fun dispatchHaptics(snapshot: GameSnapshot, myId: Int, mode: GameMode) {
+        snapshot.events.forEach { event ->
+            when (mode) {
+                GameMode.STANDARD -> dispatchStandardHaptic(event, myId)
+                GameMode.KIDS -> dispatchKidsHaptic(event, myId)
+            }
+        }
+        // Warn: someone is aiming at us
+        if (snapshot.players.any { it.id != myId && it.targetId == myId }) {
+            hapticFeedback.inCrosshairs()
+        }
+    }
+
+    private fun dispatchStandardHaptic(
+        event: com.justb81.compassduel.net.protocol.GameEvent,
+        myId: Int,
+    ) {
+        when (event.type) {
+            GameEventType.HIT -> {
+                if (event.actorId == myId) hapticFeedback.hitLanded()
+                if (event.targetId == myId) hapticFeedback.hitReceived()
+            }
+            GameEventType.BLOCKED -> {
+                if (event.targetId == myId) hapticFeedback.blocked()
+            }
+            GameEventType.ELIMINATED -> {
+                if (event.targetId == myId) hapticFeedback.eliminated()
+            }
+            else -> Unit
+        }
+    }
+
+    private fun dispatchKidsHaptic(
+        event: com.justb81.compassduel.net.protocol.GameEvent,
+        myId: Int,
+    ) {
+        when (event.type) {
+            GameEventType.CAUGHT -> {
+                if (event.actorId == myId) hapticFeedback.kidsStar()
+                if (event.targetId == myId) hapticFeedback.kidsCaught()
+            }
+            GameEventType.BUBBLED -> {
+                if (event.targetId == myId) hapticFeedback.blocked()
+            }
+            else -> Unit
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Flash helper
+    // -------------------------------------------------------------------------
+
+    private fun computeFlash(
+        events: List<com.justb81.compassduel.net.protocol.GameEvent>,
+        myId: Int,
+        mode: GameMode,
+    ): FlashEvent? = events.firstNotNullOfOrNull { event ->
+        when {
+            mode == GameMode.KIDS &&
+                (event.type == GameEventType.CAUGHT || event.type == GameEventType.BUBBLED) ->
+                FlashEvent.TWINKLE
+            mode == GameMode.STANDARD &&
+                event.type == GameEventType.HIT && event.actorId == myId ->
+                FlashEvent.GREEN
+            mode == GameMode.STANDARD &&
+                event.type == GameEventType.HIT && event.targetId == myId ->
+                FlashEvent.RED
+            mode == GameMode.STANDARD &&
+                (event.type == GameEventType.DODGED || event.type == GameEventType.BLOCKED) &&
+                event.actorId == myId ->
+                FlashEvent.GREEN
+            else -> null
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
+
+    private fun stopPipeline() {
+        if (pipelineStarted) {
+            inputPipeline.stop()
+            pipelineStarted = false
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        stopPipeline()
+    }
+
+    companion object {
+        private const val INITIAL_COUNTDOWN_SECONDS = 3
+        private const val MILLIS_PER_SECOND = 1_000L
+        private const val GRID_COLUMNS = 3
+        private const val FLASH_DURATION_MILLIS = 500L
+
+        /** Emoji + name label for each element (keyed by enum name). */
+        private val ELEMENT_EMOJIS = mapOf(
+            "FIRE" to "🔥 Fire",
+            "WATER" to "💧 Water",
+            "EARTH" to "🌿 Earth",
+            "LIGHTNING" to "⚡ Lightning",
+        )
+
+        /** Emoji for Kids Mode sprite ids. */
+        private val SPRITE_EMOJIS = listOf("⭐", "🌙", "☀️", "☄️")
+
+        /** Colours assigned to opponents in order. Cycles if more than 3 opponents. */
+        private val OPPONENT_COLORS = listOf(
+            androidx.compose.ui.graphics.Color(0xFFE53935), // Red
+            androidx.compose.ui.graphics.Color(0xFF1E88E5), // Blue
+            androidx.compose.ui.graphics.Color(0xFF43A047), // Green
+        )
+    }
+}
