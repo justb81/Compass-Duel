@@ -56,8 +56,12 @@ sealed interface GameUiState {
      * COUNTDOWN phase — players capture their facing offset.
      *
      * @param secondsLeft Whole seconds remaining in the countdown.
+     * @param mode Game mode (STANDARD or KIDS); drives the how-to-play overlay content.
      */
-    data class Countdown(val secondsLeft: Int) : GameUiState
+    data class Countdown(
+        val secondsLeft: Int,
+        val mode: GameMode,
+    ) : GameUiState
 
     /**
      * PLAYING phase — active combat / star-catching.
@@ -144,7 +148,9 @@ class GameViewModel @Inject constructor(
     private val hapticFeedback: HapticFeedback,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow<GameUiState>(GameUiState.Countdown(secondsLeft = INITIAL_COUNTDOWN_SECONDS))
+    private val _uiState = MutableStateFlow<GameUiState>(
+        GameUiState.Countdown(secondsLeft = INITIAL_COUNTDOWN_SECONDS, mode = GameMode.STANDARD),
+    )
     val uiState: StateFlow<GameUiState> = _uiState.asStateFlow()
 
     // Latest raw azimuth and pitch from the sensor (updated at sensor rate)
@@ -207,7 +213,7 @@ class GameViewModel @Inject constructor(
                 when (snapshot.phase) {
                     RoundPhase.COUNTDOWN -> {
                         val secondsLeft = (snapshot.remainingMillis / MILLIS_PER_SECOND).toInt()
-                        _uiState.value = GameUiState.Countdown(secondsLeft)
+                        _uiState.value = GameUiState.Countdown(secondsLeft, mode)
                     }
                     RoundPhase.PLAYING -> {
                         // Capture facing offset once on transition

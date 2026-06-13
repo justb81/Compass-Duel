@@ -3,6 +3,7 @@ package com.justb81.compassduel.ui.screens.game
 import android.view.WindowManager
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -10,13 +11,23 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.AssistChip
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -37,10 +48,13 @@ private val SCREEN_PADDING_DP = 16.dp
 private val SECTION_SPACING_DP = 8.dp
 private val CHIP_SPACING_DP = 4.dp
 private const val ELIMINATED_OVERLAY_ALPHA = 0.6f
+private const val HELP_SCRIM_ALPHA = 0.7f
 private const val HP_MAX = 100f
 private const val MILLIS_PER_SECOND = 1_000L
 private val WARNING_COLOR_KIDS = Color(0xFFFFEB3B)
 private val HIGHLIGHT_COLOR = Color(0xFF4CAF50)
+private val HELP_CARD_MAX_WIDTH_DP = 360.dp
+private val HELP_CARD_PADDING_DP = 20.dp
 
 /**
  * Game screen — renders COUNTDOWN, PLAYING and ROUND_OVER phases.
@@ -58,11 +72,132 @@ fun GameScreen(
 
     KeepScreenOnAndImmersive()
 
+    // Help overlay visibility is screen-local and default-collapsed; it is
+    // toggled by the "?" affordance and dismissed by tapping the scrim.
+    var helpVisible by remember { mutableStateOf(false) }
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (val state = uiState) {
             is GameUiState.Countdown -> CountdownContent(state)
             is GameUiState.Playing -> PlayingContent(state)
             GameUiState.RoundOver -> RoundOverContent()
+        }
+
+        // The how-to-play overlay is offered during the COUNTDOWN and PLAYING
+        // phases only; its content branches on the active game mode.
+        val helpMode: GameMode? = when (val state = uiState) {
+            is GameUiState.Countdown -> state.mode
+            is GameUiState.Playing -> state.mode
+            GameUiState.RoundOver -> null
+        }
+        if (helpMode != null) {
+            HelpAffordance(
+                expanded = helpVisible,
+                onToggle = { helpVisible = !helpVisible },
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(SCREEN_PADDING_DP),
+            )
+            if (helpVisible) {
+                HelpOverlay(
+                    mode = helpMode,
+                    onDismiss = { helpVisible = false },
+                )
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------
+// How-to-play overlay
+// -------------------------------------------------------------------------
+
+/**
+ * Small "?" icon button that toggles the [HelpOverlay]. Placed in the top-end
+ * corner so it stays clear of the [CompassRing].
+ */
+@Composable
+private fun HelpAffordance(
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val descriptionRes = if (expanded) R.string.game_help_close else R.string.game_help_open
+    FilledTonalIconButton(onClick = onToggle, modifier = modifier) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
+            contentDescription = stringResource(descriptionRes),
+        )
+    }
+}
+
+/**
+ * Translucent scrim + card summarizing the controls. Tapping anywhere on the
+ * scrim (or the affordance again) dismisses it. Content branches on [mode] so
+ * Kids Mode never shows combat wording.
+ */
+@Composable
+private fun HelpOverlay(
+    mode: GameMode,
+    onDismiss: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = HELP_SCRIM_ALPHA))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.Center,
+    ) {
+        Card(
+            modifier = Modifier
+                .padding(SCREEN_PADDING_DP)
+                .widthIn(max = HELP_CARD_MAX_WIDTH_DP),
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surface,
+            ),
+        ) {
+            Column(
+                modifier = Modifier.padding(HELP_CARD_PADDING_DP),
+                verticalArrangement = Arrangement.spacedBy(SECTION_SPACING_DP),
+            ) {
+                val titleRes = when (mode) {
+                    GameMode.STANDARD -> R.string.game_help_title_standard
+                    GameMode.KIDS -> R.string.game_help_title_kids
+                }
+                Text(
+                    text = stringResource(titleRes),
+                    style = MaterialTheme.typography.headlineSmall,
+                )
+                val lineResources = when (mode) {
+                    GameMode.STANDARD -> listOf(
+                        R.string.game_help_aim_standard,
+                        R.string.game_help_attack_standard,
+                        R.string.game_help_shield_standard,
+                        R.string.game_help_dodge_standard,
+                    )
+                    GameMode.KIDS -> listOf(
+                        R.string.game_help_aim_kids,
+                        R.string.game_help_toss_kids,
+                        R.string.game_help_bubble_kids,
+                        R.string.game_help_rest_kids,
+                    )
+                }
+                lineResources.forEach { lineRes ->
+                    Text(
+                        text = stringResource(lineRes),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+                Text(
+                    text = stringResource(R.string.game_help_dismiss_hint),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = SECTION_SPACING_DP),
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
