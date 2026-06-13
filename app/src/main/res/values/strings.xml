@@ -42,6 +42,9 @@
     <string name="lobby_greet_cancel">Cancel</string>
     <string name="lobby_greet_pending">Greet %1$s</string>
     <string name="lobby_greet_bow_now">Point at %1$s and bow…</string>
+    <string name="lobby_greet_phase_aim">Aim at %1$s, then tilt forward</string>
+    <string name="lobby_greet_phase_tilting">Keep tilting forward…</string>
+    <string name="lobby_greet_phase_rise">Now raise the phone back up</string>
     <string name="lobby_greet_waiting_back">Waiting for %1$s to bow back…</string>
     <string name="lobby_greet_done">✓ Greeted</string>
 
