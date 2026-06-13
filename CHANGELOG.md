@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/justb81/Compass-Duel/compare/v0.2.0...v0.3.0) (2026-06-13)
+
+
+### Features
+
+* first playable version with Elemental Duel and Kids Mode ([#15](https://github.com/justb81/Compass-Duel/issues/15)) ([a1739a4](https://github.com/justb81/Compass-Duel/commit/a1739a43730381beda280e85b399117706225f01))
+* **game:** add Kids Mode (Star Catchers) domain rules and spec ([#14](https://github.com/justb81/Compass-Duel/issues/14)) ([0bae146](https://github.com/justb81/Compass-Duel/commit/0bae146189f0a397c0bb259859afab765bfa4302))
+
+
+### Bug Fixes
+
+* **ci:** pass KEYSTORE_BASE64 via env instead of inline interpolation ([#11](https://github.com/justb81/Compass-Duel/issues/11)) ([fbca4b3](https://github.com/justb81/Compass-Duel/commit/fbca4b3430139353e10ac351b1468c984a9d6fd3))
+
 ## [0.2.0](https://github.com/justb81/Compass-Duel/compare/v0.1.2...v0.2.0) (2026-06-12)
 
 
