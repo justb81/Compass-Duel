@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.8.0](https://github.com/justb81/Compass-Duel/compare/v0.7.0...v0.8.0) (2026-06-13)
+
+
+### Features
+
+* add always-on touch controls for fire and shield ([#96](https://github.com/justb81/Compass-Duel/issues/96)) ([8bc4e0b](https://github.com/justb81/Compass-Duel/commit/8bc4e0beaa07051daae8c535af44616cddddb032))
+* reliable control delivery and graceful disconnect/reconnect ([#94](https://github.com/justb81/Compass-Duel/issues/94)) ([5236e26](https://github.com/justb81/Compass-Duel/commit/5236e26946b2bbd46b70fd810c7518b2ec43f340))
+
+
+### Bug Fixes
+
+* **build:** exclude DataStore native lib to clear Play debug-symbols warning ([#92](https://github.com/justb81/Compass-Duel/issues/92)) ([2896b10](https://github.com/justb81/Compass-Duel/commit/2896b1064153aa496d13ddf3b91689ef52662ef3))
+* correct inverted bow-to-greet gesture direction ([#95](https://github.com/justb81/Compass-Duel/issues/95)) ([c9745a5](https://github.com/justb81/Compass-Duel/commit/c9745a59da412d579ed0970443b1714855554f16))
+
+
+### Performance Improvements
+
+* **sensor:** share hot sensor flows, off-main-thread callbacks, lifecycle teardown ([#97](https://github.com/justb81/Compass-Duel/issues/97)) ([2058675](https://github.com/justb81/Compass-Duel/commit/20586758258b76222723f227d09656cf69af4de5))
+
 ## [0.7.0](https://github.com/justb81/Compass-Duel/compare/v0.6.0...v0.7.0) (2026-06-13)
 
 
