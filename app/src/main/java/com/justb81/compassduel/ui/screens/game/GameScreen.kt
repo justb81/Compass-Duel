@@ -13,13 +13,10 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -33,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowInsetsCompat
@@ -127,12 +126,14 @@ private fun HelpAffordance(
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val descriptionRes = if (expanded) R.string.game_help_close else R.string.game_help_open
-    FilledTonalIconButton(onClick = onToggle, modifier = modifier) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
-            contentDescription = stringResource(descriptionRes),
-        )
+    val description = stringResource(if (expanded) R.string.game_help_close else R.string.game_help_open)
+    // material-icons-extended is intentionally not a dependency, so use a "?" glyph
+    // (matching the emoji-marker convention used on the home and lobby screens).
+    FilledTonalIconButton(
+        onClick = onToggle,
+        modifier = modifier.semantics { contentDescription = description },
+    ) {
+        Text(text = "?", style = MaterialTheme.typography.titleLarge)
     }
 }
 
