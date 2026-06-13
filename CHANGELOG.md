@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/justb81/Compass-Duel/compare/v0.5.0...v0.5.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* resolve 23 open bug issues across domain, session, security, sensor, UI and build ([#79](https://github.com/justb81/Compass-Duel/issues/79)) ([d48ee6f](https://github.com/justb81/Compass-Duel/commit/d48ee6f2c2c58f8b062d565bf139da40ed52a222))
+
 ## [0.5.0](https://github.com/justb81/Compass-Duel/compare/v0.4.2...v0.5.0) (2026-06-13)
 
 
