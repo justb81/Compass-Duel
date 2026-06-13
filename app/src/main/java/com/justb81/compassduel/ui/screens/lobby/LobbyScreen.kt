@@ -17,6 +17,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -28,7 +29,6 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -425,7 +425,7 @@ private fun SpritePicker(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(ITEM_SPACING_DP),
     ) {
-        (0 until SPRITE_COUNT).chunked(2).forEach { row ->
+        for (row in List(SPRITE_COUNT) { it }.chunked(2)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(ITEM_SPACING_DP),
@@ -493,18 +493,17 @@ private fun SpriteButton(
  */
 private fun canStartMatch(uiState: LobbyUiState): Boolean {
     val players = uiState.players
-    if (players.size !in 2..4) return false
-    if (players.any { it.seatCell == null }) return false
     val seats = players.mapNotNull { it.seatCell }
-    if (seats.size != seats.toSet().size) return false
-    if (uiState.mode == GameMode.STANDARD) {
-        if (players.any { it.element == null }) return false
+    val isStandardValid = uiState.mode != GameMode.STANDARD || run {
         val elements = players.mapNotNull { it.element }
-        if (elements.size != elements.toSet().size) return false
-    } else {
-        if (players.any { it.spriteId == null }) return false
+        players.all { it.element != null } && elements.size == elements.toSet().size
     }
-    return true
+    val isKidsValid = uiState.mode != GameMode.KIDS || players.all { it.spriteId != null }
+    return players.size in 2..4 &&
+        players.all { it.seatCell != null } &&
+        seats.size == seats.toSet().size &&
+        isStandardValid &&
+        isKidsValid
 }
 
 private fun elementEmoji(element: Element): String = when (element) {

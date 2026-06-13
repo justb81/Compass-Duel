@@ -264,6 +264,7 @@ open class GameEngine(
     private val tickMillis: Long = DEFAULT_TICK_MILLIS,
 ) {
     private val _snapshots = MutableStateFlow(initialSnapshot())
+
     /** Live stream of authoritative game state, updated every tick. */
     val snapshots: StateFlow<GameSnapshot> = _snapshots
 

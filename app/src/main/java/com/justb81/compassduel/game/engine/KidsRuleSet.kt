@@ -51,115 +51,133 @@ class KidsRuleSet : ModeRuleSet {
         require(state is EngineState.Kids) { "KidsRuleSet requires EngineState.Kids" }
 
         val events = mutableListOf<GameEvent>()
-        var players = state.players
+        var players = applyBubblePosture(state.players, inputs.continuousInputs)
+        players = emitRestOver(players, nowMillis, events)
+
         var stats = state.stats
-
-        // Apply continuous bubble (shield) posture
-        players = players.map { player ->
-            val input = inputs.continuousInputs[player.id]
-            if (input != null) {
-                player.copy(inBubble = input.isShielding)
-            } else {
-                player
-            }
-        }
-
-        // Emit REST_OVER events for players whose rest window has expired this tick
-        players = players.map { player ->
-            if (player.restingUntilMillis > 0L && nowMillis >= player.restingUntilMillis) {
-                events += GameEvent(GameEventType.REST_OVER, player.id)
-                player.copy(restingUntilMillis = 0L)
-            } else {
-                player
-            }
-        }
-
-        // Handle ATTACK (sparkle toss) gestures
         val leaderId = starLeaderId(players)
-        for (action in inputs.queuedActions) {
-            if (action.action != PlayerAction.ATTACK) continue
-            val actorIndex = players.indexOfFirst { it.id == action.playerId }
-            if (actorIndex < 0) continue
-
-            // Accumulate sparkles thrown — every toss counts regardless of outcome
-            stats = accumulateStat(stats, action.playerId) { it.copy(sparklesThrown = it.sparklesThrown + 1) }
-
-            val actorSetup = setup.firstOrNull { it.id == action.playerId } ?: continue
-
-            // Find the best on-cone target (smallest angular distance within tolerance)
-            val targetEntry = players
-                .filter { it.id != action.playerId }
-                .mapNotNull { candidate ->
-                    val candidateSetup = setup.firstOrNull { it.id == candidate.id } ?: return@mapNotNull null
-                    val bearing = Bearing.calculate(actorSetup.position, candidateSetup.position)
-                    val distance = Bearing.angularDistance(action.aimDegrees, bearing)
-                    if (distance <= aimToleranceDegrees) candidate to distance else null
-                }
-                .minByOrNull { (_, distance) -> distance }
-
-            if (targetEntry == null) {
-                // No one in cone — miss
-                continue
-            }
-
-            val (targetPlayer, _) = targetEntry
-            val targetIndex = players.indexOfFirst { it.id == targetPlayer.id }
-            val targetSetup = setup.first { it.id == targetPlayer.id }
-            val bearing = Bearing.calculate(actorSetup.position, targetSetup.position)
-
-            val result = evaluateCatch(
-                aimAzimuth = action.aimDegrees,
-                bearingToTarget = bearing,
-                target = targetPlayer,
-                targetIsStarLeader = leaderId == targetPlayer.id,
-                nowMillis = nowMillis,
-            )
-
-            when (result) {
-                is CatchResult.Caught -> {
-                    events += GameEvent(GameEventType.CAUGHT, action.playerId, targetPlayer.id, result.catcherStars)
-                    // Catcher earns stars
-                    players = players.toMutableList().also {
-                        val catcher = players[actorIndex]
-                        it[actorIndex] = catcher.copy(stars = catcher.stars + result.catcherStars)
-                    }
-                    stats = accumulateStat(stats, action.playerId) { s -> s.copy(stars = s.stars + result.catcherStars) }
-                    // Target enters rest window
-                    players = players.toMutableList().also {
-                        it[targetIndex] = targetPlayer.copy(restingUntilMillis = nowMillis + KidsRules.REST_AFTER_CAUGHT_MILLIS)
-                    }
-                }
-                is CatchResult.Bubbled -> {
-                    events += GameEvent(GameEventType.BUBBLED, action.playerId, targetPlayer.id, result.defenderStars)
-                    // Defender earns a star
-                    players = players.toMutableList().also {
-                        it[targetIndex] = targetPlayer.copy(stars = targetPlayer.stars + result.defenderStars)
-                    }
-                    stats = accumulateStat(stats, targetPlayer.id) { s ->
-                        s.copy(
-                            stars = s.stars + result.defenderStars,
-                            bubbleBlocks = s.bubbleBlocks + 1,
-                        )
-                    }
-                }
-                CatchResult.TargetResting -> {
-                    // Toss fizzles — no event emitted
-                }
-                CatchResult.Missed -> {
-                    // Outside cone — no event emitted
-                }
-            }
+        inputs.queuedActions.filter { it.action == PlayerAction.ATTACK }.forEach { action ->
+            val outcome = applyToss(players, stats, action, leaderId, nowMillis, setup, events)
+            players = outcome.players
+            stats = outcome.stats
         }
 
-        // Build target-id map for the sparkle-ring warning indicator
         val targetIds = buildTargetIds(players, inputs.continuousInputs, setup)
-
         return TickResult(
             state = EngineState.Kids(players, stats),
             events = events,
             targetIds = targetIds,
         )
     }
+
+    /** Applies the latest magic-bubble (shield) posture to every player. */
+    private fun applyBubblePosture(
+        players: List<KidsPlayer>,
+        continuousInputs: Map<Int, ContinuousInput>,
+    ): List<KidsPlayer> = players.map { player ->
+        val input = continuousInputs[player.id]
+        if (input != null) player.copy(inBubble = input.isShielding) else player
+    }
+
+    /** Clears expired rest windows, emitting a REST_OVER event for each player that wakes up. */
+    private fun emitRestOver(
+        players: List<KidsPlayer>,
+        nowMillis: Long,
+        events: MutableList<GameEvent>,
+    ): List<KidsPlayer> = players.map { player ->
+        if (player.restingUntilMillis > 0L && nowMillis >= player.restingUntilMillis) {
+            events += GameEvent(GameEventType.REST_OVER, player.id)
+            player.copy(restingUntilMillis = 0L)
+        } else {
+            player
+        }
+    }
+
+    /**
+     * Evaluates a single sparkle toss: counts the throw, finds the best on-cone target,
+     * and resolves the catch. Returns the updated players and stats.
+     */
+    private fun applyToss(
+        players: List<KidsPlayer>,
+        stats: Map<Int, KidsRoundStats>,
+        action: QueuedAction,
+        leaderId: Int?,
+        nowMillis: Long,
+        setup: List<EnginePlayerSetup>,
+        events: MutableList<GameEvent>,
+    ): KidsTickState {
+        val actorIndex = players.indexOfFirst { it.id == action.playerId }
+        if (actorIndex < 0) return KidsTickState(players, stats)
+
+        // Every toss counts toward sparkles thrown, regardless of outcome.
+        val thrownStats = accumulateStat(stats, action.playerId) { it.copy(sparklesThrown = it.sparklesThrown + 1) }
+        val actorSetup = setup.firstOrNull { it.id == action.playerId }
+        val target = actorSetup?.let { selectTarget(action.playerId, action.aimDegrees, players, setup, it) }
+        if (actorSetup == null || target == null) return KidsTickState(players, thrownStats)
+
+        val bearing = Bearing.calculate(actorSetup.position, setup.first { it.id == target.id }.position)
+        val result = evaluateCatch(
+            aimAzimuth = action.aimDegrees,
+            bearingToTarget = bearing,
+            target = target,
+            targetIsStarLeader = leaderId == target.id,
+            nowMillis = nowMillis,
+        )
+        return resolveCatch(result, players, thrownStats, action.playerId, actorIndex, target, nowMillis, events)
+    }
+
+    @Suppress("LongParameterList")
+    private fun resolveCatch(
+        result: CatchResult,
+        players: List<KidsPlayer>,
+        stats: Map<Int, KidsRoundStats>,
+        catcherId: Int,
+        catcherIndex: Int,
+        target: KidsPlayer,
+        nowMillis: Long,
+        events: MutableList<GameEvent>,
+    ): KidsTickState {
+        val targetIndex = players.indexOfFirst { it.id == target.id }
+        return when (result) {
+            is CatchResult.Caught -> {
+                events += GameEvent(GameEventType.CAUGHT, catcherId, target.id, result.catcherStars)
+                val updated = players.toMutableList()
+                val catcher = updated[catcherIndex]
+                updated[catcherIndex] = catcher.copy(stars = catcher.stars + result.catcherStars)
+                updated[targetIndex] = target.copy(restingUntilMillis = nowMillis + KidsRules.REST_AFTER_CAUGHT_MILLIS)
+                val newStats = accumulateStat(stats, catcherId) { it.copy(stars = it.stars + result.catcherStars) }
+                KidsTickState(updated, newStats)
+            }
+            is CatchResult.Bubbled -> {
+                events += GameEvent(GameEventType.BUBBLED, catcherId, target.id, result.defenderStars)
+                val updated = players.toMutableList()
+                updated[targetIndex] = target.copy(stars = target.stars + result.defenderStars)
+                val newStats = accumulateStat(stats, target.id) { s ->
+                    s.copy(stars = s.stars + result.defenderStars, bubbleBlocks = s.bubbleBlocks + 1)
+                }
+                KidsTickState(updated, newStats)
+            }
+            CatchResult.TargetResting, CatchResult.Missed -> KidsTickState(players, stats)
+        }
+    }
+
+    /** Returns the on-cone player nearest to [aimDegrees], or null when none is within tolerance. */
+    private fun selectTarget(
+        actorId: Int,
+        aimDegrees: Float,
+        players: List<KidsPlayer>,
+        setup: List<EnginePlayerSetup>,
+        actorSetup: EnginePlayerSetup,
+    ): KidsPlayer? = players
+        .filter { it.id != actorId }
+        .mapNotNull { candidate ->
+            val candidateSetup = setup.firstOrNull { it.id == candidate.id } ?: return@mapNotNull null
+            val bearing = Bearing.calculate(actorSetup.position, candidateSetup.position)
+            val distance = Bearing.angularDistance(aimDegrees, bearing)
+            if (distance <= aimToleranceDegrees) candidate to distance else null
+        }
+        .minByOrNull { (_, distance) -> distance }
+        ?.first
 
     override fun isRoundOver(state: EngineState, elapsedMillis: Long): Boolean {
         require(state is EngineState.Kids)
@@ -193,29 +211,22 @@ class KidsRuleSet : ModeRuleSet {
         players: List<KidsPlayer>,
         continuousInputs: Map<Int, ContinuousInput>,
         setup: List<EnginePlayerSetup>,
-    ): Map<Int, Int?> {
-        return players.associate { actor ->
-            val input = continuousInputs[actor.id]
-            val targetId = if (input != null) {
-                val actorSetup = setup.firstOrNull { it.id == actor.id }
-                actorSetup?.let { actSetup ->
-                    players
-                        .filter { it.id != actor.id }
-                        .mapNotNull { candidate ->
-                            val candidateSetup = setup.firstOrNull { it.id == candidate.id } ?: return@mapNotNull null
-                            val bearing = Bearing.calculate(actSetup.position, candidateSetup.position)
-                            val distance = Bearing.angularDistance(input.aimDegrees, bearing)
-                            if (distance <= aimToleranceDegrees) candidate.id to distance else null
-                        }
-                        .minByOrNull { (_, distance) -> distance }
-                        ?.first
-                }
-            } else {
-                null
-            }
-            actor.id to targetId
+    ): Map<Int, Int?> = players.associate { actor ->
+        val input = continuousInputs[actor.id]
+        val actorSetup = setup.firstOrNull { it.id == actor.id }
+        val targetId = if (input != null && actorSetup != null) {
+            selectTarget(actor.id, input.aimDegrees, players, setup, actorSetup)?.id
+        } else {
+            null
         }
+        actor.id to targetId
     }
+
+    /** Updated players and stats produced by resolving a single sparkle toss. */
+    private data class KidsTickState(
+        val players: List<KidsPlayer>,
+        val stats: Map<Int, KidsRoundStats>,
+    )
 
     companion object {
         private const val MILLIS_PER_SECOND = 1_000L

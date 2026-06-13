@@ -1,7 +1,6 @@
 package com.justb81.compassduel.sensor
 
 import com.justb81.compassduel.game.engine.GameClock
-import com.justb81.compassduel.game.gesture.GestureThresholds
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import com.justb81.compassduel.net.protocol.PlayerAction
@@ -39,7 +38,7 @@ class InputPipelineTest {
 
         val orientation = OrientationSample(
             azimuthDegrees = 45f,
-            pitchDegrees = 0f,  // flat = shield posture is at edges; 0 is within shield range
+            pitchDegrees = 0f, // flat = shield posture is at edges; 0 is within shield range
             rollDegrees = 0f,
             accuracy = 3,
         )
@@ -72,14 +71,14 @@ class InputPipelineTest {
 
         val orientation = OrientationSample(
             azimuthDegrees = 90f,
-            pitchDegrees = 25f,  // above shield threshold (15°) but below ATTACK threshold (20°) is fine;
+            pitchDegrees = 25f, // above shield threshold (15°) but below ATTACK threshold (20°) is fine;
             // 25° > 20° → would be ATTACK if shake is present. Without shake: no gesture.
             // isShieldPosture(25f) = |25| > 15 → false → IDLE
             rollDegrees = 0f,
             accuracy = 3,
         )
         val accel = AccelerometerSample(
-            linearAccelMagnitude = LOW_ACCEL,  // no shake
+            linearAccelMagnitude = LOW_ACCEL, // no shake
             timestampMillis = START_TIME,
         )
 
@@ -184,7 +183,7 @@ class InputPipelineTest {
 
         val attackInputs = outputs.filter { it.action == PlayerAction.ATTACK }
         assertTrue(attackInputs.isNotEmpty()) {
-            "Expected ATTACK with kids-level shake (${kidsShake} m/s²) in Kids mode"
+            "Expected ATTACK with kids-level shake ($kidsShake m/s²) in Kids mode"
         }
     }
 
@@ -238,7 +237,7 @@ class InputPipelineTest {
 
         val calibration = AimCalibration(facingOffsetDegrees = 90f)
         val orientation = OrientationSample(
-            azimuthDegrees = 180f,  // raw azimuth; calibrated = (180 - 90) % 360 = 90°
+            azimuthDegrees = 180f, // raw azimuth; calibrated = (180 - 90) % 360 = 90°
             pitchDegrees = 0f,
             rollDegrees = 0f,
             accuracy = 3,

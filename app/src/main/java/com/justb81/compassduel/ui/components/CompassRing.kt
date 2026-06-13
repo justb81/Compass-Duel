@@ -20,25 +20,6 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /**
- * Represents one opponent dot on the compass ring.
- *
- * @param id Player id.
- * @param name Display name for accessibility / debug.
- * @param color The dot colour assigned to this opponent.
- * @param bearingDegrees Bearing from the local player's seat to this opponent's seat,
- *   in degrees [0, 360). Comes from [com.justb81.compassduel.game.Bearing.calculate].
- * @param onTarget True when the local player's current aim is within the aim tolerance
- *   of this opponent.
- */
-data class CompassTarget(
-    val id: Int,
-    val name: String,
-    val color: Color,
-    val bearingDegrees: Float,
-    val onTarget: Boolean,
-)
-
-/**
  * Rotating compass ring with opponent dots and a fixed top reticle.
  *
  * The ring rotates so that the player's current aim direction always points
@@ -122,7 +103,7 @@ private fun DrawScope.drawCompassTicks(
     radius: Float,
     textMeasurer: TextMeasurer,
 ) {
-    val cardinals = listOf("N" to 0f, "E" to 90f, "S" to 180f, "W" to 270f)
+    val cardinals = listOf("N" to 0f, "E" to EAST_DEG, "S" to SOUTH_DEG, "W" to WEST_DEG)
     cardinals.forEach { (label, angle) ->
         val rad = Math.toRadians(angle.toDouble())
         val tickStart = Offset(
@@ -203,9 +184,32 @@ private fun DrawScope.drawReticle(
     )
 }
 
+/**
+ * Represents one opponent dot on the compass ring.
+ *
+ * @param id Player id.
+ * @param name Display name for accessibility / debug.
+ * @param color The dot colour assigned to this opponent.
+ * @param bearingDegrees Bearing from the local player's seat to this opponent's seat,
+ *   in degrees [0, 360). Comes from [com.justb81.compassduel.game.Bearing.calculate].
+ * @param onTarget True when the local player's current aim is within the aim tolerance
+ *   of this opponent.
+ */
+data class CompassTarget(
+    val id: Int,
+    val name: String,
+    val color: Color,
+    val bearingDegrees: Float,
+    val onTarget: Boolean,
+)
+
 // -------------------------------------------------------------------------
 // Layout and style constants
 // -------------------------------------------------------------------------
+
+private const val EAST_DEG = 90f
+private const val SOUTH_DEG = 180f
+private const val WEST_DEG = 270f
 
 private const val ASPECT_RATIO = 1f
 private const val RING_RADIUS_FACTOR = 0.85f

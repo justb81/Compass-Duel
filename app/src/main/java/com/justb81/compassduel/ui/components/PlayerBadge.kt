@@ -25,6 +25,7 @@ private const val SPRITE_EMOJI_0 = "⭐"
 private const val SPRITE_EMOJI_1 = "🌙"
 private const val SPRITE_EMOJI_2 = "☀️"
 private const val SPRITE_EMOJI_3 = "☄️"
+private const val SPRITE_INDEX_COMET = 3
 
 /**
  * Reusable chip-style badge for a lobby player.
@@ -94,6 +95,6 @@ private fun spriteEmoji(spriteId: Int): String = when (spriteId) {
     0 -> SPRITE_EMOJI_0
     1 -> SPRITE_EMOJI_1
     2 -> SPRITE_EMOJI_2
-    3 -> SPRITE_EMOJI_3
+    SPRITE_INDEX_COMET -> SPRITE_EMOJI_3
     else -> SPRITE_EMOJI_0
 }

@@ -15,13 +15,13 @@ import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -504,13 +504,9 @@ class GameSessionTest {
         session.chooseCharacter(element = Element.FIRE)
         yield()
 
-        var threw = false
-        try {
+        org.junit.jupiter.api.assertThrows<IllegalStateException> {
             session.startMatch()
-        } catch (e: IllegalStateException) {
-            threw = true
         }
-        assertTrue(threw) { "Expected IllegalStateException for single player" }
     }
 
     // ---------------------------------------------------------------------------

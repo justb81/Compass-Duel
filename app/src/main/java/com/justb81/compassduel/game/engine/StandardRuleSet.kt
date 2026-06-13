@@ -44,100 +44,133 @@ class StandardRuleSet : ModeRuleSet {
         require(state is EngineState.Standard) { "StandardRuleSet requires EngineState.Standard" }
 
         val events = mutableListOf<GameEvent>()
-        var players = state.players
+        var players = applyShieldPosture(state.players, inputs.continuousInputs)
+        players = applyDodges(players, inputs.queuedActions, nowMillis)
+        players = applyAttacks(players, inputs.queuedActions, nowMillis, setup, events)
 
-        // Apply continuous shield posture
-        players = players.map { player ->
-            val input = inputs.continuousInputs[player.id]
-            if (input != null) {
-                player.copy(isShielding = input.isShielding && !player.isEliminated)
-            } else {
-                player
-            }
-        }
-
-        // Handle DODGE gestures
-        for (action in inputs.queuedActions) {
-            if (action.action != PlayerAction.DODGE) continue
-            val actorIndex = players.indexOfFirst { it.id == action.playerId }
-            if (actorIndex < 0) continue
-            val actor = players[actorIndex]
-            if (actor.isEliminated) continue
-            if (nowMillis < actor.dodgeReadyAtMillis) continue // cooldown active
-
-            players = players.toMutableList().also {
-                it[actorIndex] = actor.copy(
-                    dodgeActiveUntilMillis = nowMillis + StandardRules.DODGE_ACTIVE_MILLIS,
-                    dodgeReadyAtMillis = nowMillis + StandardRules.DODGE_ACTIVE_MILLIS + StandardRules.DODGE_COOLDOWN_MILLIS,
-                )
-            }
-        }
-
-        // Handle ATTACK gestures
-        for (action in inputs.queuedActions) {
-            if (action.action != PlayerAction.ATTACK) continue
-            val actorIndex = players.indexOfFirst { it.id == action.playerId }
-            if (actorIndex < 0) continue
-            val actor = players[actorIndex]
-            if (actor.isEliminated) continue
-            if (nowMillis < actor.attackReadyAtMillis) continue // cooldown active
-
-            // Find target: on-cone alive opponent with smallest angular distance
-            val actorSetup = setup.firstOrNull { it.id == actor.id } ?: continue
-            val targetPlayer = selectTarget(actor.id, action.aimDegrees, players, setup, actorSetup) ?: continue
-
-            val targetIndex = players.indexOfFirst { it.id == targetPlayer.id }
-            val bearing = Bearing.calculate(actorSetup.position, setup.first { it.id == targetPlayer.id }.position)
-
-            val result = evaluateAttack(
-                aimAzimuth = action.aimDegrees,
-                bearingToTarget = bearing,
-                attackerElement = actor.element,
-                target = targetPlayer,
-                nowMillis = nowMillis,
-            )
-
-            // Mark attacker as having used their attack slot
-            players = players.toMutableList().also {
-                it[actorIndex] = actor.copy(
-                    attackReadyAtMillis = nowMillis + StandardRules.ATTACK_COOLDOWN_MILLIS,
-                )
-            }
-
-            when (result) {
-                is AttackResult.Hit -> {
-                    events += GameEvent(GameEventType.HIT, actor.id, targetPlayer.id, result.damage)
-                    val damaged = applyDamage(players[targetIndex], result.damage)
-                    players = players.toMutableList().also { it[targetIndex] = damaged }
-                    if (damaged.isEliminated) {
-                        events += GameEvent(GameEventType.ELIMINATED, targetPlayer.id)
-                    }
-                }
-                is AttackResult.Dodged -> {
-                    events += GameEvent(GameEventType.DODGED, actor.id, targetPlayer.id, result.damage)
-                    val damaged = applyDamage(players[targetIndex], result.damage)
-                    players = players.toMutableList().also { it[targetIndex] = damaged }
-                    if (damaged.isEliminated) {
-                        events += GameEvent(GameEventType.ELIMINATED, targetPlayer.id)
-                    }
-                }
-                is AttackResult.Blocked -> {
-                    events += GameEvent(GameEventType.BLOCKED, actor.id, targetPlayer.id)
-                }
-                is AttackResult.Missed -> {
-                    events += GameEvent(GameEventType.MISS, actor.id, targetPlayer.id)
-                }
-            }
-        }
-
-        // Build target-id map for the warning indicator
         val targetIds = buildTargetIds(players, inputs.continuousInputs, setup)
-
         return TickResult(
             state = EngineState.Standard(players),
             events = events,
             targetIds = targetIds,
         )
+    }
+
+    /** Applies the latest continuous shield posture to every player. */
+    private fun applyShieldPosture(
+        players: List<DuelPlayer>,
+        continuousInputs: Map<Int, ContinuousInput>,
+    ): List<DuelPlayer> = players.map { player ->
+        val input = continuousInputs[player.id]
+        if (input != null) player.copy(isShielding = input.isShielding && !player.isEliminated) else player
+    }
+
+    /** Activates a dodge window for every queued DODGE action that is off cooldown. */
+    private fun applyDodges(
+        players: List<DuelPlayer>,
+        actions: List<QueuedAction>,
+        nowMillis: Long,
+    ): List<DuelPlayer> {
+        var result = players
+        actions.filter { it.action == PlayerAction.DODGE }.forEach { action ->
+            result = applyOneDodge(result, action, nowMillis)
+        }
+        return result
+    }
+
+    private fun applyOneDodge(
+        players: List<DuelPlayer>,
+        action: QueuedAction,
+        nowMillis: Long,
+    ): List<DuelPlayer> {
+        val actorIndex = players.indexOfFirst { it.id == action.playerId }
+        val actor = players.getOrNull(actorIndex)
+        if (actor == null || actor.isEliminated || nowMillis < actor.dodgeReadyAtMillis) return players
+        return players.toMutableList().also {
+            it[actorIndex] = actor.copy(
+                dodgeActiveUntilMillis = nowMillis + StandardRules.DODGE_ACTIVE_MILLIS,
+                dodgeReadyAtMillis =
+                    nowMillis + StandardRules.DODGE_ACTIVE_MILLIS + StandardRules.DODGE_COOLDOWN_MILLIS,
+            )
+        }
+    }
+
+    /** Resolves every queued ATTACK action that is off cooldown, appending the resulting events. */
+    private fun applyAttacks(
+        players: List<DuelPlayer>,
+        actions: List<QueuedAction>,
+        nowMillis: Long,
+        setup: List<EnginePlayerSetup>,
+        events: MutableList<GameEvent>,
+    ): List<DuelPlayer> {
+        var result = players
+        actions.filter { it.action == PlayerAction.ATTACK }.forEach { action ->
+            result = applyOneAttack(result, action, nowMillis, setup, events)
+        }
+        return result
+    }
+
+    private fun applyOneAttack(
+        players: List<DuelPlayer>,
+        action: QueuedAction,
+        nowMillis: Long,
+        setup: List<EnginePlayerSetup>,
+        events: MutableList<GameEvent>,
+    ): List<DuelPlayer> {
+        val actorIndex = players.indexOfFirst { it.id == action.playerId }
+        val actor = players.getOrNull(actorIndex)
+        if (actor == null || actor.isEliminated || nowMillis < actor.attackReadyAtMillis) return players
+        val actorSetup = setup.firstOrNull { it.id == actor.id }
+        val target = actorSetup?.let { selectTarget(actor.id, action.aimDegrees, players, setup, it) }
+        if (actorSetup == null || target == null) return players
+
+        val bearing = Bearing.calculate(actorSetup.position, setup.first { it.id == target.id }.position)
+        val result = evaluateAttack(
+            aimAzimuth = action.aimDegrees,
+            bearingToTarget = bearing,
+            attackerElement = actor.element,
+            target = target,
+            nowMillis = nowMillis,
+        )
+
+        val updated = players.toMutableList()
+        updated[actorIndex] = actor.copy(attackReadyAtMillis = nowMillis + StandardRules.ATTACK_COOLDOWN_MILLIS)
+        applyAttackResult(result, actor.id, target.id, updated, events)
+        return updated
+    }
+
+    private fun applyAttackResult(
+        result: AttackResult,
+        attackerId: Int,
+        targetId: Int,
+        players: MutableList<DuelPlayer>,
+        events: MutableList<GameEvent>,
+    ) {
+        when (result) {
+            is AttackResult.Hit ->
+                applyDamageEvent(GameEventType.HIT, attackerId, targetId, result.damage, players, events)
+            is AttackResult.Dodged ->
+                applyDamageEvent(GameEventType.DODGED, attackerId, targetId, result.damage, players, events)
+            is AttackResult.Blocked -> events += GameEvent(GameEventType.BLOCKED, attackerId, targetId)
+            is AttackResult.Missed -> events += GameEvent(GameEventType.MISS, attackerId, targetId)
+        }
+    }
+
+    private fun applyDamageEvent(
+        type: GameEventType,
+        attackerId: Int,
+        targetId: Int,
+        damage: Int,
+        players: MutableList<DuelPlayer>,
+        events: MutableList<GameEvent>,
+    ) {
+        events += GameEvent(type, attackerId, targetId, damage)
+        val targetIndex = players.indexOfFirst { it.id == targetId }
+        val damaged = applyDamage(players[targetIndex], damage)
+        players[targetIndex] = damaged
+        if (damaged.isEliminated) {
+            events += GameEvent(GameEventType.ELIMINATED, targetId)
+        }
     }
 
     override fun isRoundOver(state: EngineState, elapsedMillis: Long): Boolean {

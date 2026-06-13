@@ -230,7 +230,7 @@ class GameViewModel @Inject constructor(
                             lastHapticSeq = snapshot.seq
                             dispatchHaptics(snapshot, myId, mode)
                         }
-                        _uiState.value = buildPlayingState(snapshot, lobby, players, mode, myId)
+                        _uiState.value = buildPlayingState(snapshot, players, mode, myId)
                     }
                     RoundPhase.ROUND_OVER -> {
                         stopPipeline()
@@ -247,63 +247,23 @@ class GameViewModel @Inject constructor(
 
     private fun buildPlayingState(
         snapshot: GameSnapshot,
-        lobby: com.justb81.compassduel.net.protocol.NetMessage.LobbyState,
         lobbyPlayers: List<LobbyPlayer>,
         mode: GameMode,
         myId: Int,
     ): GameUiState.Playing {
         val mySnap = snapshot.players.firstOrNull { it.id == myId }
         val myLobby = lobbyPlayers.firstOrNull { it.id == myId }
-
         val myCell = myLobby?.seatCell ?: 0
         val myPos = Position(x = (myCell % GRID_COLUMNS).toFloat(), y = (myCell / GRID_COLUMNS).toFloat())
-
         val tolerance = if (mode == GameMode.KIDS) KidsRules.AIM_TOLERANCE_DEGREES else Bearing.DEFAULT_TOLERANCE_DEGREES
 
-        val compassTargets = snapshot.players
-            .filter { it.id != myId }
-            .mapIndexedNotNull { index, playerSnap ->
-                val opponentLobby = lobbyPlayers.firstOrNull { it.id == playerSnap.id } ?: return@mapIndexedNotNull null
-                val cell = opponentLobby.seatCell ?: return@mapIndexedNotNull null
-                val opponentPos = Position(x = (cell % GRID_COLUMNS).toFloat(), y = (cell / GRID_COLUMNS).toFloat())
-                val bearing = Bearing.calculate(myPos, opponentPos)
-                val onTarget = Bearing.isOnTarget(calibratedAim, bearing, tolerance)
-                CompassTarget(
-                    id = playerSnap.id,
-                    name = opponentLobby.name,
-                    color = OPPONENT_COLORS[index % OPPONENT_COLORS.size],
-                    bearingDegrees = bearing,
-                    onTarget = onTarget,
-                )
-            }
-
+        val compassTargets = buildCompassTargets(snapshot, lobbyPlayers, myId, myPos, tolerance)
+        val opponents = buildOpponents(snapshot, lobbyPlayers, myId)
         val warningActive = snapshot.players.any { it.id != myId && it.targetId == myId }
 
-        val opponents = snapshot.players
-            .filter { it.id != myId }
-            .mapNotNull { ps ->
-                val lp = lobbyPlayers.firstOrNull { it.id == ps.id } ?: return@mapNotNull null
-                OpponentUiModel(
-                    id = ps.id,
-                    name = lp.name,
-                    hp = ps.hp,
-                    stars = ps.stars,
-                    isEliminated = ps.status == PlayerStatus.ELIMINATED,
-                )
-            }
+        val myElement = if (mode == GameMode.STANDARD) myLobby?.element?.name?.let { ELEMENT_EMOJIS[it] } else null
+        val mySpriteEmoji = if (mode == GameMode.KIDS) myLobby?.spriteId?.let { SPRITE_EMOJIS.getOrNull(it) } else null
 
-        val myElement = if (mode == GameMode.STANDARD) {
-            myLobby?.element?.name?.let { ELEMENT_EMOJIS[it] }
-        } else {
-            null
-        }
-        val mySpriteEmoji = if (mode == GameMode.KIDS) {
-            myLobby?.spriteId?.let { SPRITE_EMOJIS.getOrNull(it) }
-        } else {
-            null
-        }
-
-        // Compute flash event from this snapshot's events (cleared after FLASH_DURATION_MILLIS).
         val flash = computeFlash(snapshot.events, myId, mode)
         val existingFlash = (_uiState.value as? GameUiState.Playing)?.flashEvent
         val resolvedFlash = flash ?: existingFlash
@@ -338,6 +298,46 @@ class GameViewModel @Inject constructor(
             debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
         )
     }
+
+    private fun buildCompassTargets(
+        snapshot: GameSnapshot,
+        lobbyPlayers: List<LobbyPlayer>,
+        myId: Int,
+        myPos: Position,
+        tolerance: Float,
+    ): List<CompassTarget> = snapshot.players
+        .filter { it.id != myId }
+        .mapIndexedNotNull { index, playerSnap ->
+            val opponentLobby = lobbyPlayers.firstOrNull { it.id == playerSnap.id } ?: return@mapIndexedNotNull null
+            val cell = opponentLobby.seatCell ?: return@mapIndexedNotNull null
+            val opponentPos = Position(x = (cell % GRID_COLUMNS).toFloat(), y = (cell / GRID_COLUMNS).toFloat())
+            val bearing = Bearing.calculate(myPos, opponentPos)
+            val onTarget = Bearing.isOnTarget(calibratedAim, bearing, tolerance)
+            CompassTarget(
+                id = playerSnap.id,
+                name = opponentLobby.name,
+                color = OPPONENT_COLORS[index % OPPONENT_COLORS.size],
+                bearingDegrees = bearing,
+                onTarget = onTarget,
+            )
+        }
+
+    private fun buildOpponents(
+        snapshot: GameSnapshot,
+        lobbyPlayers: List<LobbyPlayer>,
+        myId: Int,
+    ): List<OpponentUiModel> = snapshot.players
+        .filter { it.id != myId }
+        .mapNotNull { ps ->
+            val lp = lobbyPlayers.firstOrNull { it.id == ps.id } ?: return@mapNotNull null
+            OpponentUiModel(
+                id = ps.id,
+                name = lp.name,
+                hp = ps.hp,
+                stars = ps.stars,
+                isEliminated = ps.status == PlayerStatus.ELIMINATED,
+            )
+        }
 
     // -------------------------------------------------------------------------
     // Haptic dispatch
@@ -399,27 +399,23 @@ class GameViewModel @Inject constructor(
         events: List<com.justb81.compassduel.net.protocol.GameEvent>,
         myId: Int,
         mode: GameMode,
-    ): FlashEvent? {
-        for (event in events) {
-            when {
-                mode == GameMode.KIDS &&
-                    (event.type == GameEventType.CAUGHT || event.type == GameEventType.BUBBLED) ->
-                    return FlashEvent.TWINKLE
-                mode == GameMode.STANDARD &&
-                    event.type == GameEventType.HIT && event.actorId == myId ->
-                    return FlashEvent.GREEN
-                mode == GameMode.STANDARD &&
-                    event.type == GameEventType.HIT && event.targetId == myId ->
-                    return FlashEvent.RED
-                mode == GameMode.STANDARD &&
-                    event.type == GameEventType.DODGED && event.actorId == myId ->
-                    return FlashEvent.GREEN
-                mode == GameMode.STANDARD &&
-                    event.type == GameEventType.BLOCKED && event.actorId == myId ->
-                    return FlashEvent.GREEN
-            }
+    ): FlashEvent? = events.firstNotNullOfOrNull { event ->
+        when {
+            mode == GameMode.KIDS &&
+                (event.type == GameEventType.CAUGHT || event.type == GameEventType.BUBBLED) ->
+                FlashEvent.TWINKLE
+            mode == GameMode.STANDARD &&
+                event.type == GameEventType.HIT && event.actorId == myId ->
+                FlashEvent.GREEN
+            mode == GameMode.STANDARD &&
+                event.type == GameEventType.HIT && event.targetId == myId ->
+                FlashEvent.RED
+            mode == GameMode.STANDARD &&
+                (event.type == GameEventType.DODGED || event.type == GameEventType.BLOCKED) &&
+                event.actorId == myId ->
+                FlashEvent.GREEN
+            else -> null
         }
-        return null
     }
 
     // -------------------------------------------------------------------------

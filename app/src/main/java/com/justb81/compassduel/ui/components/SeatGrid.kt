@@ -26,7 +26,6 @@ import com.justb81.compassduel.net.protocol.LobbyPlayer
 
 private const val GRID_COLUMN_COUNT = 3
 private const val GRID_TOTAL_CELLS = 9
-private const val CELL_CORNER_RADIUS_DP = 8
 private const val CELL_BORDER_WIDTH_DP = 2
 private const val CELL_PADDING_DP = 4
 private const val GRID_SPACING_DP = 6

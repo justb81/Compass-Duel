@@ -47,8 +47,15 @@ class HapticFeedback @Inject constructor(
      */
     fun eliminated() {
         if (!vibrator.hasVibrator()) return
-        val timings = longArrayOf(ELIMINATED_TIMINGS_0, ELIMINATED_TIMINGS_1, ELIMINATED_TIMINGS_2, ELIMINATED_TIMINGS_3, ELIMINATED_TIMINGS_4, ELIMINATED_TIMINGS_5)
-        val amplitudes = intArrayOf(0, VibrationEffect.DEFAULT_AMPLITUDE, 0, VibrationEffect.DEFAULT_AMPLITUDE, 0, VibrationEffect.DEFAULT_AMPLITUDE)
+        val timings = longArrayOf(
+            ELIMINATED_TIMINGS_0, ELIMINATED_TIMINGS_1, ELIMINATED_TIMINGS_2,
+            ELIMINATED_TIMINGS_3, ELIMINATED_TIMINGS_4, ELIMINATED_TIMINGS_5,
+        )
+        val amplitudes = intArrayOf(
+            0, VibrationEffect.DEFAULT_AMPLITUDE,
+            0, VibrationEffect.DEFAULT_AMPLITUDE,
+            0, VibrationEffect.DEFAULT_AMPLITUDE,
+        )
         vibrator.vibrate(VibrationEffect.createWaveform(timings, amplitudes, NO_REPEAT))
     }
 
@@ -95,6 +102,7 @@ class HapticFeedback @Inject constructor(
         private const val HIT_RECEIVED_MILLIS = 200L
         private const val IN_CROSSHAIRS_INTERVAL_MILLIS = 1_000L
         private const val NO_REPEAT = -1
+
         // Elimination waveform timings: off, on, off, on, off, on
         private const val ELIMINATED_TIMINGS_0 = 0L
         private const val ELIMINATED_TIMINGS_1 = 100L

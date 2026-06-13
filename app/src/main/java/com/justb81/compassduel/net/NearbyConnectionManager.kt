@@ -1,6 +1,5 @@
 package com.justb81.compassduel.net
 
-import android.content.Context
 import android.util.Log
 import com.google.android.gms.nearby.connection.AdvertisingOptions
 import com.google.android.gms.nearby.connection.ConnectionInfo
@@ -16,7 +15,6 @@ import com.google.android.gms.nearby.connection.PayloadTransferUpdate
 import com.google.android.gms.nearby.connection.Strategy
 import com.justb81.compassduel.net.protocol.MessageCodec
 import com.justb81.compassduel.net.protocol.NetMessage
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +41,6 @@ import javax.inject.Singleton
  */
 @Singleton
 class NearbyConnectionManager @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val connectionsClient: ConnectionsClient,
 ) : MessageTransport {
 

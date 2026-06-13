@@ -6,7 +6,6 @@ import com.justb81.compassduel.game.kids.KidsRules
 import com.justb81.compassduel.game.standard.StandardRules
 import com.justb81.compassduel.net.protocol.PlayerAction
 import com.justb81.compassduel.net.protocol.RoundPhase
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -171,7 +170,6 @@ class GameEngineTest {
         // First dodge
         engine.submitInput(2, 0f, false, PlayerAction.DODGE)
         engine.tick()
-        val p2After1 = engine.snapshots.value.players.first { it.id == 2 }
         // Player should have an active dodge right now — hp stays intact even if attacked
         // The dodgeReadyAtMillis is internal; we verify through the game state
 
@@ -312,8 +310,10 @@ class GameEngineTest {
     companion object {
         private const val COUNTDOWN_MILLIS = 3_000L
         private const val MILLIS_PER_SECOND = 1_000L
+
         /** Strong matchup = 30 dmg per hit; 4 hits KO a 100-HP player. */
         private const val ATTACKS_TO_KO = 4
+
         /** Enough attacks to accumulate many stars, but not to end a kids round. */
         private const val KIDS_ATTACK_COUNT = 5
     }

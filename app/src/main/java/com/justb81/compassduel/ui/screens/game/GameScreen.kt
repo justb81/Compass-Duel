@@ -34,6 +34,8 @@ private val CHIP_SPACING_DP = 4.dp
 private const val ELIMINATED_OVERLAY_ALPHA = 0.6f
 private const val HP_MAX = 100f
 private const val MILLIS_PER_SECOND = 1_000L
+private val WARNING_COLOR_KIDS = Color(0xFFFFEB3B)
+private val HIGHLIGHT_COLOR = Color(0xFF4CAF50)
 
 /**
  * Game screen — renders COUNTDOWN, PLAYING and ROUND_OVER phases.
@@ -114,14 +116,14 @@ private fun PlayingContent(state: GameUiState.Playing) {
             val warningColor = if (state.mode == GameMode.STANDARD) {
                 Color.Red
             } else {
-                Color(0xFFFFEB3B) // soft yellow sparkle ring for Kids
+                WARNING_COLOR_KIDS
             }
             CompassRing(
                 currentAzimuthDegrees = state.azimuthDegrees,
                 targets = state.compassTargets,
                 isTargeted = state.warningActive,
                 warningColor = warningColor,
-                highlightColor = Color(0xFF4CAF50),
+                highlightColor = HIGHLIGHT_COLOR,
                 modifier = Modifier.weight(1f),
             )
 
@@ -289,4 +291,3 @@ private fun RoundOverContent() {
         )
     }
 }
-
