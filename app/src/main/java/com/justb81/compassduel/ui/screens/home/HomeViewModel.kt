@@ -1,6 +1,8 @@
 package com.justb81.compassduel.ui.screens.home
 
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.justb81.compassduel.data.preferences.UserPreferencesRepository
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.session.GameSession
@@ -8,7 +10,9 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /** UI state for the home screen. */
@@ -20,16 +24,26 @@ data class HomeUiState(
 /**
  * ViewModel for the home screen.
  *
- * Holds the player name (in-memory only in v1) and the selected game mode. The home screen
- * doubles as the discovery entry point: it browses for nearby hosts via [GameSession.startBrowsing]
- * and lets the user either join one of them or create (host) their own.
+ * Holds the player name and the selected game mode. The last-used name is restored from
+ * [UserPreferencesRepository] on init and re-persisted whenever the user hosts or joins. The home
+ * screen doubles as the discovery entry point: it browses for nearby hosts via
+ * [GameSession.startBrowsing] and lets the user either join one of them or create (host) their own.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val session: GameSession,
+    private val prefs: UserPreferencesRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState())
+
+    init {
+        viewModelScope.launch {
+            val saved = prefs.playerName.first()
+            // Don't clobber a name the user typed before this async read returned.
+            _uiState.update { if (it.playerName.isEmpty()) it.copy(playerName = saved) else it }
+        }
+    }
 
     /** Observable UI state consumed by [HomeScreen]. */
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
@@ -61,6 +75,7 @@ class HomeViewModel @Inject constructor(
     fun hostGame(): Boolean {
         val name = _uiState.value.playerName.trim()
         if (name.isBlank()) return false
+        viewModelScope.launch { prefs.setPlayerName(name) }
         session.hostLobby(playerName = name, mode = _uiState.value.selectedMode)
         return true
     }
@@ -73,6 +88,7 @@ class HomeViewModel @Inject constructor(
     fun joinGame(endpointId: String): Boolean {
         val name = _uiState.value.playerName.trim()
         if (name.isBlank()) return false
+        viewModelScope.launch { prefs.setPlayerName(name) }
         session.joinLobby(playerName = name, endpointId = endpointId)
         return true
     }

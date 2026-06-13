@@ -1,5 +1,6 @@
 package com.justb81.compassduel.ui.screens.home
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,9 +35,11 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justb81.compassduel.R
+import com.justb81.compassduel.data.preferences.ThemePreference
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.ui.permissions.NearbyPermissionsGate
+import com.justb81.compassduel.ui.settings.SettingsViewModel
 
 private val SCREEN_PADDING_DP = 24.dp
 private val ITEM_SPACING_DP = 16.dp
@@ -59,14 +62,17 @@ private const val MODE_ICON_KIDS = "🌟"
  * @param onNavigateToLobby Called with `isHost = true` when the user creates a game,
  *   or `isHost = false` when the user joins one.
  * @param viewModel Injected [HomeViewModel].
+ * @param settingsViewModel Injected [SettingsViewModel] backing the theme selector.
  */
 @Composable
 fun HomeScreen(
     onNavigateToLobby: (isHost: Boolean) -> Unit,
     viewModel: HomeViewModel = hiltViewModel(),
+    settingsViewModel: SettingsViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val discoveredEndpoints by viewModel.discoveredEndpoints.collectAsStateWithLifecycle()
+    val themePreference by settingsViewModel.themePreference.collectAsStateWithLifecycle()
 
     Column(
         modifier = Modifier
@@ -78,6 +84,13 @@ fun HomeScreen(
         Text(
             text = stringResource(R.string.app_name),
             style = MaterialTheme.typography.headlineLarge,
+        )
+        Spacer(modifier = Modifier.height(ITEM_SPACING_DP))
+
+        ThemeSelector(
+            selected = themePreference,
+            onSelected = settingsViewModel::onThemeSelected,
+            modifier = Modifier.fillMaxWidth(),
         )
         Spacer(modifier = Modifier.height(SECTION_SPACING_DP))
 
@@ -150,6 +163,34 @@ private fun ModeSelector(
             Text(text = stringResource(R.string.home_mode_kids))
         }
     }
+}
+
+/** Three-way app theme picker (System / Light / Dark), persisted via [SettingsViewModel]. */
+@Composable
+private fun ThemeSelector(
+    selected: ThemePreference,
+    onSelected: (ThemePreference) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val options = ThemePreference.entries
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        options.forEachIndexed { index, option ->
+            SegmentedButton(
+                selected = selected == option,
+                onClick = { onSelected(option) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = options.size),
+            ) {
+                Text(text = stringResource(option.labelRes()))
+            }
+        }
+    }
+}
+
+@StringRes
+private fun ThemePreference.labelRes(): Int = when (this) {
+    ThemePreference.SYSTEM -> R.string.home_theme_system
+    ThemePreference.LIGHT -> R.string.home_theme_light
+    ThemePreference.DARK -> R.string.home_theme_dark
 }
 
 /**

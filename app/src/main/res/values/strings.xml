@@ -17,6 +17,9 @@
     <string name="home_searching">Searching for nearby games…</string>
     <string name="home_no_games_found">No games yet. Create your own, or wait for a host nearby.</string>
     <string name="home_join_button">Join</string>
+    <string name="home_theme_system">System</string>
+    <string name="home_theme_light">Light</string>
+    <string name="home_theme_dark">Dark</string>
 
     <!-- Crash report dialog (shown on next launch after an uncaught exception) -->
     <string name="crash_dialog_title">The app closed unexpectedly</string>

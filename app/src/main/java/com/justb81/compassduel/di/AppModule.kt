@@ -4,6 +4,9 @@ import android.content.Context
 import android.hardware.SensorManager
 import android.os.Vibrator
 import android.os.VibratorManager
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStore
 import com.google.android.gms.nearby.Nearby
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import com.justb81.compassduel.game.engine.GameClock
@@ -42,6 +45,17 @@ annotation class ApplicationScope
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class GameLoopDispatcher
+
+/**
+ * Process-wide Preferences DataStore delegate.
+ *
+ * Declared exactly once at top level and only ever read off the application context (via the
+ * provider below) — two delegates, or reads off different contexts, would throw
+ * "There are multiple DataStores active for the same file".
+ */
+private val Context.userPreferencesDataStore: DataStore<Preferences> by preferencesDataStore(
+    name = "user_preferences",
+)
 
 /**
  * Hilt module that provides application-level singletons.
@@ -98,5 +112,11 @@ abstract class AppModule {
         @Singleton
         fun provideGameEngineFactory(): GameEngineFactory =
             GameEngineFactory { rules, clock, scope -> GameEngine(rules, clock, scope) }
+
+        @Provides
+        @Singleton
+        fun provideUserPreferencesDataStore(
+            @ApplicationContext context: Context,
+        ): DataStore<Preferences> = context.userPreferencesDataStore
     }
 }
