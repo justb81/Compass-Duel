@@ -106,6 +106,15 @@ fun LobbyScreen(
         }
     }
 
+    val transportErrorRes = uiState.transportErrorRes
+    val transportErrorMessage = transportErrorRes?.let { stringResource(it) }
+    LaunchedEffect(transportErrorRes) {
+        if (transportErrorMessage != null) {
+            snackbarHostState.showSnackbar(transportErrorMessage)
+            viewModel.clearTransportError()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(

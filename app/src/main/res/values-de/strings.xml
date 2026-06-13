@@ -30,6 +30,11 @@
     <string name="lobby_start_button">Spiel starten</string>
     <string name="lobby_waiting_for_host">Warte auf den Host …</string>
 
+    <!-- Lobby — transport errors -->
+    <string name="lobby_error_host_failed">Hosten fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind, und versuche es erneut.</string>
+    <string name="lobby_error_discovery_failed">Suche nach Hosts fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind.</string>
+    <string name="lobby_error_connect_failed">Verbindung zum Host fehlgeschlagen. Bitte versuche es erneut.</string>
+
     <!-- Lobby — client discovery -->
     <string name="lobby_searching">Suche nach Hosts in der Nähe …</string>
     <string name="lobby_no_hosts_found">Noch kein Host gefunden. Stelle sicher, dass der Host ein Spiel gestartet hat.</string>

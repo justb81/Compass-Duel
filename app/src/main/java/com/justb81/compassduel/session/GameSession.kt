@@ -13,6 +13,7 @@ import com.justb81.compassduel.game.standard.MatchScore
 import com.justb81.compassduel.net.ConnectionEvent
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.MessageTransport
+import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.GameSnapshot
 import com.justb81.compassduel.net.protocol.LobbyPlayer
@@ -127,6 +128,12 @@ class GameSession @Inject constructor(
      * Clients observe this to populate the "nearby hosts" list.
      */
     val discoveredEndpoints: StateFlow<List<DiscoveredEndpoint>> = transport.discoveredEndpoints
+
+    /**
+     * Transport failures (e.g. Play Services threw while starting advertising/discovery);
+     * backed directly by the transport. ViewModels observe this to surface a user-facing error.
+     */
+    val transportErrors: SharedFlow<TransportError> = transport.transportErrors
 
     // ---------------------------------------------------------------------------
     // Private session state (host only unless noted)

@@ -17,6 +17,23 @@ sealed interface ConnectionEvent {
 }
 
 /**
+ * A transport operation that failed and should be surfaced to the user.
+ *
+ * Emitted when a Play Services call throws synchronously or fails asynchronously, so the
+ * UI can report the failure instead of the app crashing (or appearing to hang).
+ */
+enum class TransportError {
+    /** [MessageTransport.startAdvertising] failed (host could not start hosting). */
+    ADVERTISE,
+
+    /** [MessageTransport.startDiscovery] failed (client could not search for hosts). */
+    DISCOVER,
+
+    /** [MessageTransport.requestConnection] failed (client could not reach the host). */
+    CONNECT,
+}
+
+/**
  * Abstraction over the Nearby Connections transport so [com.justb81.compassduel.session.GameSession]
  * can be tested against an in-memory fake transport without Play Services.
  */
@@ -33,6 +50,9 @@ interface MessageTransport {
 
     /** Ids of all currently connected endpoints. */
     val connectedEndpointIds: StateFlow<Set<String>>
+
+    /** Emits when a transport operation fails (e.g. Play Services throws). */
+    val transportErrors: SharedFlow<TransportError>
 
     /** Start advertising so clients can discover this device. */
     fun startAdvertising(localName: String)
