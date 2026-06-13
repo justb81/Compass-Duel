@@ -40,6 +40,34 @@ import javax.inject.Singleton
 enum class SessionRole { HOST, CLIENT }
 
 /**
+ * Result of [GameSession.startMatch]. Replaces the previous exception-based contract so
+ * callers can map each failure to a user-facing message without try/catch.
+ */
+sealed interface StartResult {
+
+    /** The match started successfully. */
+    data object Success : StartResult
+
+    /** No lobby exists yet (host has not created one). */
+    data object NoLobby : StartResult
+
+    /** Fewer than the minimum number of players are present. */
+    data object TooFewPlayers : StartResult
+
+    /** More than the maximum number of players are present. */
+    data object TooManyPlayers : StartResult
+
+    /** Not every ordered pair of players has greeted each other. */
+    data object NotAllGreeted : StartResult
+
+    /** Standard mode: at least one player has not chosen an element. */
+    data object MissingElements : StartResult
+
+    /** Standard mode: two or more players chose the same element. */
+    data object DuplicateElements : StartResult
+}
+
+/**
  * Navigation-level events emitted by [GameSession] when significant state transitions occur.
  *
  * Screens collect [GameSession.sessionEvents] and drive navigation accordingly.
@@ -146,8 +174,8 @@ class GameSession @Inject constructor(
     val sessionEvents: SharedFlow<SessionEvent> = _sessionEvents.asSharedFlow()
 
     /**
-     * Endpoints discovered during [joinLobby]; backed directly by the transport.
-     * Clients observe this to populate the "nearby hosts" list.
+     * Endpoints discovered during the [startBrowsing] phase; backed directly by the transport.
+     * The home screen observes this to populate the "nearby games" list.
      */
     val discoveredEndpoints: StateFlow<List<DiscoveredEndpoint>> = transport.discoveredEndpoints
 
@@ -224,6 +252,9 @@ class GameSession @Inject constructor(
      */
     fun hostLobby(playerName: String, mode: GameMode) {
         reset()
+        // End any home-screen browse-phase discovery before advertising; reset() does not
+        // touch the transport, so without this the device would scan and advertise at once.
+        transport.stopDiscovery()
         _role.value = SessionRole.HOST
         localPlayerName = playerName
         synchronized(lobbyLock) {
@@ -250,30 +281,38 @@ class GameSession @Inject constructor(
      * Requirements: 2–4 players; every ordered pair of players has greeted each other
      * (a complete bearing matrix); in STANDARD mode all players have chosen a unique element.
      *
-     * @throws IllegalStateException if validation fails.
+     * @return [StartResult.Success] when the match started, or a specific failure reason.
      */
-    fun startMatch() {
-        val currentLobby = _lobby.value ?: return
+    fun startMatch(): StartResult {
+        val currentLobby = _lobby.value ?: return StartResult.NoLobby
         val players = synchronized(lobbyLock) { lobbyPlayers.toList() }
 
-        check(players.size in MIN_PLAYERS..MAX_PLAYERS) {
-            "Need $MIN_PLAYERS–$MAX_PLAYERS players; have ${players.size}"
-        }
-        check(synchronized(lobbyLock) { allPairsGreeted(players) }) {
-            "All players must greet each other before starting"
-        }
-
-        if (currentLobby.mode == GameMode.STANDARD) {
-            check(players.all { it.element != null }) { "All players must choose an element in Standard mode" }
-            val elements = players.mapNotNull { it.element }
-            check(elements.size == elements.toSet().size) { "Duplicate element choices" }
-        }
+        val failure = validateStart(currentLobby, players)
+        if (failure != null) return failure
 
         roundIndex = 0
         matchScore = MatchScore()
         matchInProgress = true
         startRoundInternal(currentLobby.mode, players)
         transport.acceptNewConnections = false
+        return StartResult.Success
+    }
+
+    /**
+     * Returns the [StartResult] failure for the given lobby/players, or null when the lobby
+     * is valid to start. Guard-clause validator — [Suppress]ing ReturnCount is idiomatic here.
+     */
+    @Suppress("ReturnCount")
+    private fun validateStart(lobby: NetMessage.LobbyState, players: List<LobbyPlayer>): StartResult? {
+        if (players.size < MIN_PLAYERS) return StartResult.TooFewPlayers
+        if (players.size > MAX_PLAYERS) return StartResult.TooManyPlayers
+        if (!synchronized(lobbyLock) { allPairsGreeted(players) }) return StartResult.NotAllGreeted
+        if (lobby.mode == GameMode.STANDARD) {
+            if (players.any { it.element == null }) return StartResult.MissingElements
+            val elements = players.mapNotNull { it.element }
+            if (elements.size != elements.toSet().size) return StartResult.DuplicateElements
+        }
+        return null
     }
 
     /**
@@ -306,28 +345,39 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     /**
-     * Starts discovering hosts over Nearby (client only).
-     *
-     * @param playerName The client's display name, sent to the host after connecting.
+     * Starts the home-screen browse phase: discovers nearby hosts without committing to a
+     * role. Safe to call while [role] is null — the incoming-message and connection handlers
+     * are no-ops until a role is set, so discovered endpoints populate but nothing else fires.
+     * Pair with [stopBrowsing] when leaving the entry screen.
      */
-    fun joinLobby(playerName: String) {
+    fun startBrowsing() {
         reset()
-        _role.value = SessionRole.CLIENT
-        clientPlayerName = playerName
-        startConnectionListener()
-        startMessageListener()
         transport.startDiscovery()
     }
 
-    /**
-     * Requests a connection to a discovered host endpoint (client only).
-     *
-     * @param endpointId The endpoint to connect to (from [MessageTransport.discoveredEndpoints]).
-     */
-    fun connectTo(endpointId: String) {
-        hostEndpointId = endpointId
-        transport.requestConnection(endpointId, clientPlayerName)
+    /** Stops the home-screen browse-phase discovery. Leaves [role] null. */
+    fun stopBrowsing() {
         transport.stopDiscovery()
+    }
+
+    /**
+     * Commits to joining a specific discovered host (client role). Stops discovery, takes the
+     * CLIENT role, starts the listeners, and requests the connection. The display name is sent
+     * to the host once connected.
+     *
+     * @param playerName The client's display name.
+     * @param endpointId The host endpoint to connect to (from [MessageTransport.discoveredEndpoints]).
+     */
+    fun joinLobby(playerName: String, endpointId: String) {
+        reset()
+        // reset() clears hostEndpointId, so set it after.
+        _role.value = SessionRole.CLIENT
+        clientPlayerName = playerName
+        hostEndpointId = endpointId
+        startConnectionListener()
+        startMessageListener()
+        transport.stopDiscovery()
+        transport.requestConnection(endpointId, clientPlayerName)
     }
 
     // ---------------------------------------------------------------------------

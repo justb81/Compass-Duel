@@ -1,6 +1,7 @@
 package com.justb81.compassduel.ui.screens.home
 
 import androidx.lifecycle.ViewModel
+import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.session.GameSession
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -19,8 +20,9 @@ data class HomeUiState(
 /**
  * ViewModel for the home screen.
  *
- * Holds the player name (in-memory only in v1) and the selected game mode, then
- * delegates to [GameSession] to start hosting or discovering a lobby.
+ * Holds the player name (in-memory only in v1) and the selected game mode. The home screen
+ * doubles as the discovery entry point: it browses for nearby hosts via [GameSession.startBrowsing]
+ * and lets the user either join one of them or create (host) their own.
  */
 @HiltViewModel
 class HomeViewModel @Inject constructor(
@@ -32,6 +34,9 @@ class HomeViewModel @Inject constructor(
     /** Observable UI state consumed by [HomeScreen]. */
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    /** Nearby hosts discovered while the home screen is browsing. */
+    val discoveredEndpoints: StateFlow<List<DiscoveredEndpoint>> = session.discoveredEndpoints
+
     /** Updates the player name as the user types. */
     fun onPlayerNameChanged(name: String) {
         _uiState.update { it.copy(playerName = name) }
@@ -42,23 +47,33 @@ class HomeViewModel @Inject constructor(
         _uiState.update { it.copy(selectedMode = mode) }
     }
 
+    /** Starts discovering nearby hosts (call once permissions are granted). */
+    fun startBrowsing() = session.startBrowsing()
+
+    /** Stops discovering nearby hosts (call when leaving the home screen). */
+    fun stopBrowsing() = session.stopBrowsing()
+
     /**
-     * Starts advertising a lobby with the current player name and mode.
+     * Starts advertising a lobby with the current (trimmed) player name and mode.
      *
-     * The caller is responsible for navigating to the lobby screen after this call.
+     * @return true when hosting started; false when the name is blank (caller must not navigate).
      */
-    fun hostGame() {
-        val state = _uiState.value
-        session.hostLobby(playerName = state.playerName.trim(), mode = state.selectedMode)
+    fun hostGame(): Boolean {
+        val name = _uiState.value.playerName.trim()
+        if (name.isBlank()) return false
+        session.hostLobby(playerName = name, mode = _uiState.value.selectedMode)
+        return true
     }
 
     /**
-     * Starts discovery so the user can find a host to join.
+     * Joins the given discovered host with the current (trimmed) player name.
      *
-     * The caller is responsible for navigating to the lobby screen after this call.
+     * @return true when the join started; false when the name is blank (caller must not navigate).
      */
-    fun joinGame() {
-        val state = _uiState.value
-        session.joinLobby(playerName = state.playerName.trim())
+    fun joinGame(endpointId: String): Boolean {
+        val name = _uiState.value.playerName.trim()
+        if (name.isBlank()) return false
+        session.joinLobby(playerName = name, endpointId = endpointId)
+        return true
     }
 }

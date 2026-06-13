@@ -232,23 +232,58 @@ class GameSessionTest {
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `joinLobby sets role to CLIENT and starts discovery`() = testScope.runTest {
+    fun `startBrowsing starts discovery and leaves role null`() = testScope.runTest {
         val session = buildSession()
 
-        session.joinLobby(playerName = "Bob")
+        session.startBrowsing()
         yield()
 
-        assertEquals(SessionRole.CLIENT, session.role.value)
+        assertNull(session.role.value)
         assertTrue(transport.discoveryStarted)
     }
 
     @Test
-    fun `connectTo sends ClientHello after connected event`() = testScope.runTest {
+    fun `stopBrowsing stops discovery`() = testScope.runTest {
         val session = buildSession()
-        session.joinLobby(playerName = "Bob")
+        session.startBrowsing()
+
+        session.stopBrowsing()
         yield()
 
-        session.connectTo(endpointId = "host-ep")
+        assertTrue(transport.discoveryStopped)
+    }
+
+    @Test
+    fun `joinLobby commits to endpoint, stops discovery and sets CLIENT`() = testScope.runTest {
+        val session = buildSession()
+        session.startBrowsing()
+        yield()
+
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
+        yield()
+
+        assertEquals(SessionRole.CLIENT, session.role.value)
+        assertTrue(transport.discoveryStopped)
+    }
+
+    @Test
+    fun `hostLobby after browsing stops discovery before advertising`() = testScope.runTest {
+        val session = buildSession()
+        session.startBrowsing()
+        yield()
+
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        assertEquals(SessionRole.HOST, session.role.value)
+        assertTrue(transport.discoveryStopped)
+        assertTrue(transport.advertisingStarted)
+    }
+
+    @Test
+    fun `joinLobby sends ClientHello after connected event`() = testScope.runTest {
+        val session = buildSession()
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
         yield()
 
         // Simulate the connected event from transport.
@@ -332,8 +367,7 @@ class GameSessionTest {
     @Test
     fun `client receives LobbyState and updates lobby flow`() = testScope.runTest {
         val session = buildSession()
-        session.joinLobby(playerName = "Bob")
-        session.connectTo("host-ep")
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
         yield()
 
         val lobbyState = NetMessage.LobbyState(
@@ -350,8 +384,7 @@ class GameSessionTest {
     @Test
     fun `client receives RoundStart and emits RoundStarted event`() = testScope.runTest {
         val session = buildSession()
-        session.joinLobby(playerName = "Bob")
-        session.connectTo("host-ep")
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
         yield()
 
         session.sessionEvents.test {
@@ -373,8 +406,7 @@ class GameSessionTest {
     @Test
     fun `client receives Rematch and emits RematchRequested event`() = testScope.runTest {
         val session = buildSession()
-        session.joinLobby(playerName = "Bob")
-        session.connectTo("host-ep")
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
         yield()
 
         session.sessionEvents.test {
@@ -421,9 +453,7 @@ class GameSessionTest {
     @Test
     fun `client submitBow sends Greeting to host endpoint`() = testScope.runTest {
         val session = buildSession()
-        session.joinLobby(playerName = "Bob")
-        yield()
-        session.connectTo("host-ep")
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
         yield()
         // The client must know its own id before it can send a Greeting.
         transport.emitIncoming(
@@ -483,9 +513,7 @@ class GameSessionTest {
     @Test
     fun `client receives host disconnection emits PeerLost`() = testScope.runTest {
         val session = buildSession()
-        session.joinLobby(playerName = "Bob")
-        yield()
-        session.connectTo("host-ep")
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
         yield()
 
         session.sessionEvents.test {
@@ -572,16 +600,55 @@ class GameSessionTest {
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `startMatch throws when fewer than 2 players`() = testScope.runTest {
+    fun `startMatch returns NoLobby when no lobby exists`() = testScope.runTest {
+        val session = buildSession()
+
+        assertEquals(StartResult.NoLobby, session.startMatch())
+    }
+
+    @Test
+    fun `startMatch returns TooFewPlayers when only the host is present`() = testScope.runTest {
         val session = buildSession()
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
         session.chooseCharacter(element = Element.FIRE)
         yield()
 
-        org.junit.jupiter.api.assertThrows<IllegalStateException> {
-            session.startMatch()
-        }
+        assertEquals(StartResult.TooFewPlayers, session.startMatch())
     }
+
+    @Test
+    fun `startMatch returns MissingElements when a standard player has no element`() =
+        testScope.runTest {
+            val session = buildSession()
+            session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+            yield()
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+            // Both pairs greet, but neither player picks an element.
+            session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+            transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
+            yield()
+
+            assertEquals(StartResult.MissingElements, session.startMatch())
+        }
+
+    @Test
+    fun `startMatch returns DuplicateElements when two players pick the same element`() =
+        testScope.runTest {
+            val session = buildSession()
+            session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+            yield()
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            yield()
+            session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
+            transport.emitIncoming("ep2", NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f))
+            yield()
+            session.chooseCharacter(element = Element.FIRE)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(element = Element.FIRE))
+            yield()
+
+            assertEquals(StartResult.DuplicateElements, session.startMatch())
+        }
 
     // ---------------------------------------------------------------------------
     // Security: host trust boundary (#39 - #43)
@@ -665,9 +732,7 @@ class GameSessionTest {
     @Test
     fun `client ignores message not from host endpoint`() = testScope.runTest {
         val session = buildSession()
-        session.joinLobby(playerName = "Bob")
-        yield()
-        session.connectTo("host-ep")
+        session.joinLobby(playerName = "Bob", endpointId = "host-ep")
         yield()
 
         // Inject a LobbyState from a different (untrusted) endpoint.
@@ -900,12 +965,12 @@ class GameSessionTest {
             NetMessage.Greeting(fromPlayerId = 2, toPlayerId = 1, bearingDegrees = 0f),
         )
         yield()
-        org.junit.jupiter.api.assertThrows<IllegalStateException> { session.startMatch() }
+        assertEquals(StartResult.NotAllGreeted, session.startMatch())
 
         // Host bows back — now every ordered pair is greeted and the match can start.
         session.submitBow(toPlayerId = 2, bearingDegrees = 180f)
         yield()
-        session.startMatch()
+        assertEquals(StartResult.Success, session.startMatch())
         yield()
 
         val roundStart = transport.sentMessages.filterIsInstance<NetMessage.RoundStart>().lastOrNull()
@@ -1118,9 +1183,7 @@ class GameSessionTest {
     fun `client roundEnd is cleared on next RoundStart for non-final rounds`() =
         testScope.runTest {
             val session = buildSession()
-            session.joinLobby(playerName = "Bob")
-            yield()
-            session.connectTo("host-ep")
+            session.joinLobby(playerName = "Bob", endpointId = "host-ep")
             yield()
             transport.emitConnection(ConnectionEvent.Connected("host-ep", "host-ep"))
             yield()
