@@ -1,5 +1,6 @@
 package com.justb81.compassduel.net
 
+import app.cash.turbine.test
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import kotlinx.coroutines.CoroutineScope
@@ -150,9 +151,12 @@ class ReliableMessageTransportTest {
         yield()
 
         // The same envelope arrives twice (a retransmit); the inner payload is delivered once.
+        // Each yield lets both the decorator's collector and the receive collector advance.
         delegate.deliver("ep", NetMessage.Reliable(5L, controlMessage))
         yield()
+        yield()
         delegate.deliver("ep", NetMessage.Reliable(5L, controlMessage))
+        yield()
         yield()
 
         assertEquals(listOf<Pair<String, NetMessage>>("ep" to controlMessage), received)
@@ -163,17 +167,18 @@ class ReliableMessageTransportTest {
     @Test
     fun `lossy traffic passes straight through without an envelope`() = testScope.runTest {
         val transport = build(backgroundScope)
-        val received = mutableListOf<Pair<String, NetMessage>>()
-        backgroundScope.launch { transport.incomingMessages.collect { received += it } }
+        // Let the decorator's internal collector subscribe to the delegate before delivering.
         yield()
-
         val snapshot = NetMessage.PlayerMoved(playerId = 2, significant = true)
-        transport.send("ep", snapshot)
-        delegate.deliver("ep", snapshot)
-        yield()
 
-        assertEquals("ep" to (snapshot as NetMessage), delegate.sent.last())
-        assertEquals(listOf<Pair<String, NetMessage>>("ep" to snapshot), received)
+        transport.incomingMessages.test {
+            transport.send("ep", snapshot)
+            delegate.deliver("ep", snapshot)
+            assertEquals(("ep" to snapshot), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        // The lossy send was forwarded verbatim — no Reliable envelope, no extra traffic.
+        assertEquals(("ep" to snapshot), delegate.sent.single())
     }
 
     @Test
