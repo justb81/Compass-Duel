@@ -59,7 +59,7 @@ class OrientationSensor @Inject constructor(
         val rotationMatrix = FloatArray(MATRIX_SIZE)
         val remappedMatrix = FloatArray(MATRIX_SIZE)
         val orientationValues = FloatArray(ORIENTATION_COMPONENTS)
-        var currentAccuracy = SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM
+        @Volatile var currentAccuracy = SensorManager.SENSOR_STATUS_ACCURACY_MEDIUM
 
         val listener = object : SensorEventListener {
             override fun onSensorChanged(event: SensorEvent) {

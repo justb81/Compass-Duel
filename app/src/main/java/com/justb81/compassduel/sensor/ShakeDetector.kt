@@ -19,12 +19,14 @@ import kotlin.math.sqrt
  * [com.justb81.compassduel.game.gesture.GestureClassifier] can apply its threshold without
  * knowing the sensor origin.
  *
+ * Timestamps are intentionally omitted here. [InputPipeline] stamps every [MotionSample]
+ * via the injected [com.justb81.compassduel.game.engine.GameClock] so all timing goes through
+ * a single, test-controllable source.
+ *
  * @param linearAccelMagnitude `|sqrt(x² + y² + z²) − GRAVITY_EARTH|` in m/s².
- * @param timestampMillis System.currentTimeMillis() at sample capture.
  */
 data class AccelerometerSample(
     val linearAccelMagnitude: Float,
-    val timestampMillis: Long,
 )
 
 /**
@@ -51,7 +53,7 @@ class ShakeDetector @Inject constructor(
                 val z = event.values[2]
                 val magnitude = sqrt(x * x + y * y + z * z)
                 val linearMagnitude = abs(magnitude - SensorManager.GRAVITY_EARTH)
-                trySend(AccelerometerSample(linearMagnitude, System.currentTimeMillis()))
+                trySend(AccelerometerSample(linearMagnitude))
             }
 
             override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
