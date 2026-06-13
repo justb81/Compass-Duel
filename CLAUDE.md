@@ -156,14 +156,15 @@ description and treat a red `Test & Build` check as a blocker. Do **not** pass
 - release-please with Conventional Commits; version in `.release-please-manifest.json`.
 - `versionCode` derives from `github.run_number` in CI; `versionName` from release-please.
 - Merging the release-please PR tags a release and triggers `release.yml`:
-  signed APK + AAB → GitHub Release (with native debug symbols + R8 mapping) and
-  the Play Store **internal** track via Gradle Play Publisher.
-- The release job resolves an NDK (newest pre-installed on the runner, else a
-  pinned `sdkmanager` install) and exports `ANDROID_NDK_VERSION`. The app has no
-  native sources, but AGP needs the NDK's `objcopy` to extract native debug
-  symbols from dependency `.so` files (e.g. play-services) and embed them in the
-  AAB; without it the symbols are silently never generated and Play Console
-  flags the bundle as missing debug symbols.
+  signed APK + AAB → GitHub Release (with the R8 mapping) and the Play Store
+  **internal** track via Gradle Play Publisher.
+- The app ships **no native code**. Its only transitive `.so`
+  (`libandroidx.graphics.path.so`, a pre-API-34 fast path from
+  `androidx.graphics:graphics-path`) is excluded via `packaging.jniLibs` in
+  `app/build.gradle.kts` — on minSdk 35 the platform `PathIterator` is used and
+  the lib is never loaded. Excluding it stops Play Console flagging the bundle
+  for missing native debug symbols (which can't be generated for a prebuilt
+  stripped lib anyway). Do not re-add `ndk.debugSymbolLevel` / NDK install steps.
 
 ### Required CI secrets
 

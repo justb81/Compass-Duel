@@ -147,8 +147,8 @@ git config core.hooksPath .githooks
   uploads SARIF to GitHub code scanning on every push/PR.
 - **`release.yml`** — release-please opens a release PR from Conventional
   Commits; merging it tags a release, builds a **signed** APK + AAB, attaches
-  them (plus native debug symbols and the R8 mapping) to the GitHub Release, and
-  uploads the AAB to the Google Play **internal** track.
+  them (plus the R8 mapping) to the GitHub Release, and uploads the AAB to the
+  Google Play **internal** track.
 
 ## 🔑 Required GitHub secrets
 
