@@ -89,6 +89,9 @@ android {
         sarifReport = true
         htmlReport = true
         xmlReport = false
+        // Print findings to the build log so CI surfaces them without downloading
+        // the HTML/SARIF artifact.
+        textReport = true
         val moduleBaseline = file("lint-baseline.xml")
         if (moduleBaseline.exists()) {
             baseline = moduleBaseline
