@@ -43,16 +43,20 @@ The chosen element also determines the attack gesture (see Game Mechanics).
 
 | Action | Gesture | Description |
 |---|---|---|
-| **Attack** | Tilt phone toward opponent + quick shake | Deals damage if opponent is in targeting zone |
-| **Shield** | Hold phone flat (horizontal) | Fully blocks incoming attacks |
-| **Dodge** | Quick tilt in opposite direction | Reduces damage by 50%, 2s cooldown |
-| **Special** | Double quick shake | Element-specific attack (higher damage, longer cooldown) |
+| **Fire** | Aim at an opponent + a quick swing/jerk | Deals damage if the opponent is in the targeting zone; a swing also drops the shield |
+| **Shield** | Hold the phone upright (screen toward you) and steady for >1 s | Fully blocks incoming attacks; limited to a **per-round budget of 50% of the round time** |
+| **Special** | Double quick shake | Element-specific attack (reserved, not yet implemented) |
+
+The shield has a **time budget equal to half the round duration**. Holding the
+shield consumes the budget; once it is exhausted the shield can no longer be
+held for the rest of the round. The remaining budget and the <1 s arming
+progress are shown by a shield indicator in the center of the compass.
 
 ### Hit Detection
 
 A hit is only registered when:
 - The attacker's **azimuth angle** is within **Â±25Â°** of the actual bearing toward the target [^1]
-- The tilt gesture (pitch angle > 20Â°) is correctly detected [^2]
+- A **swing/jerk** (acceleration spike above the fire threshold) is detected [^2]
 - The attack arrives at the Host within **200ms** of the gesture timestamp [^3]
 
 All inputs are evaluated centrally on the Host device â€” no client-side hit detection, preventing cheating.
@@ -71,7 +75,7 @@ Lobby â†’ Calibration (10s) â†’ Combat Phase (90s) â†’ Results â
 
 - Players can "block" each other: a player in shield mode absorbs attacks that would fly "through" them.
 - **Free-for-All:** Everyone targets everyone. Optional: 2v2 team mode with shared HP pools.
-- The screen shows when someone is aiming at you (warning indicator) â€” giving time for a dodge or shield.
+- The screen shows when someone is aiming at you (warning indicator) â€” giving time to raise the shield.
 
 ***
 
@@ -173,23 +177,24 @@ SensorManager.getOrientation(remappedMatrix, orientation)
 
 Important: `remapCoordinateSystem()` is required when the device is not lying flat on a table â€” when held upright, the coordinate system must be adjusted [^2][^8].
 
-#### Tilt Detection (Attack Gesture)
+#### Gesture Detection (Fire & Shield)
 
-Attack gestures are detected via a combination of pitch threshold + acceleration spike:
+Two gestures are detected from the fused orientation + accelerometer stream
+(`GestureClassifier`):
+
+- **Fire** — a swing/jerk: an acceleration spike above the fire threshold
+  (`~2.5 m/s²` Standard, `~1.5` Kids), debounced. The current aim azimuth selects
+  the target; a fire also drops the shield.
+- **Shield** — held upright and steady: `|pitch| ≤ 25°` (upright, screen toward
+  the player) **and** linear acceleration `≤ ~1.2 m/s²` (steady) sustained for
+  `>1 s`. It stays active while upright until a fire swing or leaving the upright
+  band. Subject to the per-round 50%-of-round time budget (host-enforced).
 
 ```kotlin
-data class GestureState(
-    val azimuth: Float,         // Current compass direction (0â€“360Â°)
-    val pitch: Float,           // Forward tilt angle
-    val roll: Float,            // Sideways tilt angle
-    val shakeDetected: Boolean,
-    val isShielding: Boolean    // pitch < 15Â° â†’ holding flat = shield
-)
-
-// Shake detection via acceleration delta
+// Swing detection via acceleration delta
 val acceleration = sqrt(x*x + y*y + z*z) - SensorManager.GRAVITY_EARTH
-if (acceleration > SHAKE_THRESHOLD) {  // ~2.5 m/sÂ²
-    onShakeDetected(currentAzimuth, currentPitch)
+if (acceleration >= FIRE_SWING_THRESHOLD) {  // ~2.5 m/s²
+    onFire(currentAzimuth)
 }
 ```
 
@@ -211,7 +216,7 @@ If the magnetometer is completely unreliable (sensor accuracy = `SENSOR_STATUS_U
   "az": 187.3,        // Azimuth in degrees
   "pt": 32.1,         // Pitch in degrees
   "rl": -5.2,         // Roll in degrees
-  "act": "ATTACK",    // IDLE | ATTACK | SHIELD | DODGE | SPECIAL
+  "act": "ATTACK",    // IDLE | ATTACK | SHIELD | SPECIAL
   "ts": 1718124523445 // Timestamp (ms since epoch)
 }
 ```
@@ -338,7 +343,7 @@ Uses signal strength between devices as a distance estimate [^11]. Accuracy appr
 - [ ] Tilt/shake gesture detection
 - [ ] Hit detection algorithm on Host
 - [ ] HP system + game state sync
-- [ ] Shield and dodge mechanics
+- [ ] Shield mechanics (upright hold + 50%-of-round budget)
 
 #### Phase 3: UX & Polish (Weekend 3, ~8h)
 - [ ] Vibration feedback via `Vibrator`/`VibrationEffect`
@@ -377,7 +382,7 @@ Uses signal strength between devices as a distance estimate [^11]. Accuracy appr
 
 ## Summary
 
-Compass Duel combines **physical interaction** (compass orientation, tilt gestures), **offline P2P networking** (Nearby Connections), and **tactical gameplay** (elements, shield, dodge) into a game explicitly designed for mobile use in moving vehicles. The biggest technical challenge â€” magnetometer interference â€” is mitigated by robust fallback strategies. A first playable prototype is realistically achievable in 2â€“3 weekends.
+Compass Duel combines **physical interaction** (compass orientation, tilt gestures), **offline P2P networking** (Nearby Connections), and **tactical gameplay** (elements, shield) into a game explicitly designed for mobile use in moving vehicles. The biggest technical challenge â€” magnetometer interference â€” is mitigated by robust fallback strategies. A first playable prototype is realistically achievable in 2â€“3 weekends.
 
 ---
 
@@ -427,6 +432,21 @@ clock is unreliable. Instead, v1 enforces a **700 ms per-player attack cooldown*
 on the host (`StandardRules.ATTACK_COOLDOWN_MILLIS`). The `clientTimeMillis` field
 is included in the payload for diagnostics only and is never used for timing
 decisions.
+
+### Simplified gestures: hold-upright Shield + swing-to-Fire; Dodge removed
+
+The original tilt-forward+shake attack, flat-hold shield, and reverse-tilt dodge
+proved hard to trigger reliably. v1 ships a simpler two-gesture model
+(`GestureClassifier`): **Fire** is a quick swing/jerk that fires toward the
+current aim and drops the shield; **Shield** is activated by holding the phone
+upright and steady for >1 s. **Dodge has been removed entirely** — there is no
+`PlayerAction.DODGE`, `PlayerStatus.DODGING`, or `GameEventType.DODGED`.
+
+The shield is limited by a **per-round time budget of 50% of the round duration**
+(`StandardRules.SHIELD_BUDGET_MILLIS`), consumed by the host while a player
+shields and reported per player as `PlayerSnapshot.shieldRemainingMillis`. The
+client renders a center-of-compass `ShieldIndicator` showing the <1 s arming
+progress, the active state, and the remaining budget.
 
 ### Special attack deferred
 

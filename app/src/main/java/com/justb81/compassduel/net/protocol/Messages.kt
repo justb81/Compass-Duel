@@ -13,7 +13,7 @@ import kotlinx.serialization.Serializable
 /** The game mode chosen by the host in the lobby. */
 @Serializable
 enum class GameMode {
-    /** Standard "Elemental Duel" — elements, HP, attack/shield/dodge, best-of-3. */
+    /** Standard "Elemental Duel" — elements, HP, attack/shield, best-of-3. */
     STANDARD,
 
     /** Kids Mode "Star Catchers" — sparkles, stars, magic bubble, awards. */
@@ -31,7 +31,6 @@ enum class PlayerAction {
     IDLE,
     SHIELD,
     ATTACK,
-    DODGE,
 
     /** Reserved for future double-shake special attack; treated as [IDLE] in v1. */
     SPECIAL,
@@ -61,7 +60,6 @@ enum class PlayerStatus {
     IDLE,
     SHIELDING,
     ATTACKING,
-    DODGING,
 
     /** Kids Mode: player is in the post-catch rest window. */
     RESTING,
@@ -78,9 +76,6 @@ enum class GameEventType {
 
     /** Standard: an attack was fully blocked by the target's shield. */
     BLOCKED,
-
-    /** Standard: a dodge reduced the attack's damage. */
-    DODGED,
 
     /** Standard or Kids: an attack/toss was outside the aim cone. */
     MISS,
@@ -129,6 +124,9 @@ data class LobbyPlayer(
  *   or null when off-target. Used by clients to display the warning indicator.
  * @param restingUntilMillis Epoch millis until which the player is resting
  *   (Kids Mode only; 0 otherwise).
+ * @param shieldRemainingMillis Remaining shield-time budget in millis
+ *   (Standard Mode only; 0 otherwise). The per-round budget is
+ *   [com.justb81.compassduel.game.standard.StandardRules.SHIELD_BUDGET_MILLIS].
  */
 @Serializable
 data class PlayerSnapshot(
@@ -138,6 +136,7 @@ data class PlayerSnapshot(
     val status: PlayerStatus = PlayerStatus.IDLE,
     val targetId: Int? = null,
     val restingUntilMillis: Long = 0L,
+    val shieldRemainingMillis: Long = 0L,
 )
 
 /**
@@ -268,7 +267,7 @@ sealed interface NetMessage {
 
     /**
      * Continuous input payload sent by each client every 100 ms (and immediately on
-     * ATTACK/DODGE actions).
+     * an ATTACK action).
      *
      * @param playerId The sender's player id.
      * @param aimDegrees Calibrated aim azimuth in degrees [0, 360).

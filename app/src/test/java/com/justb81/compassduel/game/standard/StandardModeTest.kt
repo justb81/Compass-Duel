@@ -2,14 +2,11 @@ package com.justb81.compassduel.game.standard
 
 import com.justb81.compassduel.game.Element
 import org.junit.jupiter.api.Assertions.assertEquals
-import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class StandardModeTest {
-
-    private val now = 1_000_000L
 
     // ---------------------------------------------------------------------------
     // Helper factories
@@ -20,13 +17,11 @@ class StandardModeTest {
         element: Element? = Element.WATER,
         hp: Int = StandardRules.MAX_HP,
         isShielding: Boolean = false,
-        dodgeActiveUntilMillis: Long = 0L,
     ) = DuelPlayer(
         id = id,
         element = element,
         hp = hp,
         isShielding = isShielding,
-        dodgeActiveUntilMillis = dodgeActiveUntilMillis,
     )
 
     // ---------------------------------------------------------------------------
@@ -42,7 +37,6 @@ class StandardModeTest {
             bearingToTarget = 0f,
             attackerElement = Element.FIRE,
             target = target,
-            nowMillis = now,
         )
         assertEquals(AttackResult.Hit(damage = 30), result)
     }
@@ -56,7 +50,6 @@ class StandardModeTest {
             bearingToTarget = 0f,
             attackerElement = Element.FIRE,
             target = target,
-            nowMillis = now,
         )
         assertEquals(AttackResult.Hit(damage = 10), result)
     }
@@ -70,7 +63,6 @@ class StandardModeTest {
             bearingToTarget = 0f,
             attackerElement = Element.FIRE,
             target = target,
-            nowMillis = now,
         )
         assertEquals(AttackResult.Hit(damage = 20), result)
     }
@@ -87,37 +79,17 @@ class StandardModeTest {
             bearingToTarget = 0f,
             attackerElement = Element.FIRE,
             target = shielding,
-            nowMillis = now,
         )
         assertEquals(AttackResult.Blocked, result)
     }
 
     // ---------------------------------------------------------------------------
-    // evaluateAttack — dodge halves and rounds
+    // DuelPlayer — shield budget default
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `dodge halves damage and rounds to nearest integer`() {
-        // FIRE strong vs EARTH = 30 raw; halved to 15
-        val dodging = alivePlayer(
-            element = Element.EARTH,
-            dodgeActiveUntilMillis = now + StandardRules.DODGE_ACTIVE_MILLIS,
-        )
-        val result = evaluateAttack(
-            aimAzimuth = 0f,
-            bearingToTarget = 0f,
-            attackerElement = Element.FIRE,
-            target = dodging,
-            nowMillis = now,
-        )
-        assertEquals(AttackResult.Dodged(damage = 15), result)
-    }
-
-    @Test
-    fun `dodge is not active after window expires`() {
-        val player = alivePlayer(dodgeActiveUntilMillis = now)
-        assertFalse(player.isDodging(now))
-        assertTrue(player.isDodging(now - 1))
+    fun `a new player starts with the full shield-time budget`() {
+        assertEquals(StandardRules.SHIELD_BUDGET_MILLIS, alivePlayer().shieldRemainingMillis)
     }
 
     // ---------------------------------------------------------------------------
@@ -132,7 +104,6 @@ class StandardModeTest {
             bearingToTarget = 0f,
             attackerElement = Element.FIRE,
             target = target,
-            nowMillis = now,
         )
         assertEquals(AttackResult.Missed, result)
     }
@@ -149,7 +120,6 @@ class StandardModeTest {
             bearingToTarget = 0f,
             attackerElement = Element.FIRE,
             target = eliminated,
-            nowMillis = now,
         )
         assertEquals(AttackResult.Missed, result)
     }

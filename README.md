@@ -2,8 +2,8 @@
 
 A local, offline Android multiplayer game for 2–4 players that turns physical
 device orientation into the core game mechanic. Aim your phone at opponents
-using the magnetometer/gyroscope, then attack, shield and dodge by tilting and
-shaking. All communication runs fully offline over the **Google Nearby
+using the magnetometer/gyroscope, then fire with a quick swing or raise a shield
+by holding the phone upright and steady. All communication runs fully offline over the **Google Nearby
 Connections API** (BLE + Wi-Fi P2P) — built for trains, cars and buses, no
 internet required.
 
@@ -16,8 +16,8 @@ technical specification.
 
 Players choose an element (Fire, Water, Earth, Lightning) with classic
 strength/weakness matchups. Each round is 90 seconds; players start with
-100 HP. Attacks deal elemental damage; shields fully block; dodges halve
-damage. The last survivor wins the round. First to two round wins takes the
+100 HP. Attacks deal elemental damage; shields fully block but are limited to a
+budget of half the round time. The last survivor wins the round. First to two round wins takes the
 match. Exact ties on the 90 s timeout are decided by highest HP; a tie on HP
 counts as a draw.
 

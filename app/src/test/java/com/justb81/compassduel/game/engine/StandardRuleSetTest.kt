@@ -6,6 +6,7 @@ import com.justb81.compassduel.game.standard.StandardRules
 import com.justb81.compassduel.net.protocol.GameEventType
 import com.justb81.compassduel.net.protocol.PlayerAction
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -130,26 +131,54 @@ class StandardRuleSetTest {
     }
 
     // ---------------------------------------------------------------------------
-    // Dodge cooldown enforcement
+    // Shield-time budget
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `dodge cooldown prevents second dodge within cooldown window`() {
+    fun `shielding consumes the budget across ticks`() {
         val state = twoPlayerState()
-        val dodgeInputs = TickInputs(
-            continuousInputs = mapOf(2 to ContinuousInput(aimDegrees = 0f, isShielding = false)),
-            queuedActions = listOf(QueuedAction(2, PlayerAction.DODGE, 0f)),
+        val shieldInputs = TickInputs(
+            continuousInputs = mapOf(2 to ContinuousInput(aimDegrees = 0f, isShielding = true)),
+            queuedActions = emptyList(),
         )
-        // First dodge — sets the active window and cooldown
-        val result1 = rules.onTick(state, dodgeInputs, now, setup)
-        val p2after1 = (result1.state as EngineState.Standard).players.first { it.id == 2 }
-        assertTrue(p2after1.dodgeActiveUntilMillis > now)
+        // First tick sets lastTickMillis (delta = 0); the second consumes 1 s.
+        val tick1 = rules.onTick(state, shieldInputs, now, setup)
+        val tick2 = rules.onTick(tick1.state, shieldInputs, now + MILLIS_PER_SECOND, setup)
+        val p2 = (tick2.state as EngineState.Standard).players.first { it.id == 2 }
+        assertEquals(StandardRules.SHIELD_BUDGET_MILLIS - MILLIS_PER_SECOND, p2.shieldRemainingMillis)
+        assertTrue(p2.isShielding)
+    }
 
-        // Try second dodge immediately — should be blocked by cooldown
-        val result2 = rules.onTick(result1.state, dodgeInputs, now + 100L, setup)
-        val p2after2 = (result2.state as EngineState.Standard).players.first { it.id == 2 }
-        // dodgeReadyAtMillis should still be far in the future (not reset)
-        assertTrue(p2after2.dodgeReadyAtMillis > now + 100L)
+    @Test
+    fun `shield is force-dropped once the budget is exhausted`() {
+        // Seed player 2 with almost no budget left.
+        val seeded = twoPlayerState().let { s ->
+            EngineState.Standard(
+                s.players.map { if (it.id == 2) it.copy(shieldRemainingMillis = 100L) else it },
+                lastTickMillis = now,
+            )
+        }
+        val shieldInputs = TickInputs(
+            continuousInputs = mapOf(2 to ContinuousInput(aimDegrees = 0f, isShielding = true)),
+            queuedActions = emptyList(),
+        )
+        val result = rules.onTick(seeded, shieldInputs, now + MILLIS_PER_SECOND, setup)
+        val p2 = (result.state as EngineState.Standard).players.first { it.id == 2 }
+        assertEquals(0L, p2.shieldRemainingMillis)
+        assertFalse(p2.isShielding)
+    }
+
+    @Test
+    fun `budget is not consumed when the player is not shielding`() {
+        val state = twoPlayerState()
+        val idleInputs = TickInputs(
+            continuousInputs = mapOf(2 to ContinuousInput(aimDegrees = 0f, isShielding = false)),
+            queuedActions = emptyList(),
+        )
+        val tick1 = rules.onTick(state, idleInputs, now, setup)
+        val tick2 = rules.onTick(tick1.state, idleInputs, now + FIVE_SECONDS_MILLIS, setup)
+        val p2 = (tick2.state as EngineState.Standard).players.first { it.id == 2 }
+        assertEquals(StandardRules.SHIELD_BUDGET_MILLIS, p2.shieldRemainingMillis)
     }
 
     // ---------------------------------------------------------------------------
@@ -218,5 +247,6 @@ class StandardRuleSetTest {
 
     companion object {
         private const val MILLIS_PER_SECOND = 1_000L
+        private const val FIVE_SECONDS_MILLIS = 5_000L
     }
 }

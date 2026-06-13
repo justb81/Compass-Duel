@@ -108,7 +108,8 @@ sealed interface GameUiState {
         val flashEvent: FlashEvent?,
         val actionEffect: ActionEffect?,
         val shielding: Boolean,
-        val dodging: Boolean,
+        val shieldArmProgress: Float,
+        val shieldRemainingFraction: Float,
         val restingUntilMillis: Long,
         val debugAimDegrees: Float?,
     ) : GameUiState
@@ -187,6 +188,10 @@ class GameViewModel @Inject constructor(
     // Current calibrated aim for the compass ring
     private var calibratedAim = 0f
 
+    // Local shield arming progress [0, 1], reported by the InputPipeline at sensor
+    // rate so the center shield indicator can animate its "loading" ring.
+    private var latestShieldArmProgress = 0f
+
     // Last processed snapshot sequence number (to avoid re-processing haptics)
     private var lastHapticSeq = -1
 
@@ -238,6 +243,7 @@ class GameViewModel @Inject constructor(
                         mode = mode,
                         calibration = cal,
                         onInput = session::submitLocalInput,
+                        onShieldArmProgress = { latestShieldArmProgress = it },
                     )
                 }
 
@@ -250,6 +256,7 @@ class GameViewModel @Inject constructor(
                 if (current is GameUiState.Playing) {
                     _uiState.value = current.copy(
                         azimuthDegrees = sample.azimuthDegrees,
+                        shieldArmProgress = latestShieldArmProgress,
                         debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
                     )
                 }
@@ -298,6 +305,7 @@ class GameViewModel @Inject constructor(
                                         mode = mode,
                                         calibration = cal,
                                         onInput = session::submitLocalInput,
+                                        onShieldArmProgress = { latestShieldArmProgress = it },
                                     )
                                 }
                                 CalibrationDecision.Defer -> {
@@ -411,7 +419,9 @@ class GameViewModel @Inject constructor(
             flashEvent = resolvedFlash,
             actionEffect = resolvedEffect,
             shielding = myStatus == PlayerStatus.SHIELDING,
-            dodging = myStatus == PlayerStatus.DODGING,
+            shieldArmProgress = latestShieldArmProgress,
+            shieldRemainingFraction =
+                (mySnap?.shieldRemainingMillis ?: 0L).toFloat() / StandardRules.SHIELD_BUDGET_MILLIS,
             restingUntilMillis = mySnap?.restingUntilMillis ?: 0L,
             debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
         )
@@ -529,8 +539,7 @@ class GameViewModel @Inject constructor(
                 event.type == GameEventType.HIT && event.targetId == myId ->
                 FlashEvent.RED
             mode == GameMode.STANDARD &&
-                (event.type == GameEventType.DODGED || event.type == GameEventType.BLOCKED) &&
-                event.actorId == myId ->
+                event.type == GameEventType.BLOCKED && event.actorId == myId ->
                 FlashEvent.GREEN
             else -> null
         }

@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
@@ -44,6 +45,7 @@ import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.PlayerStatus
 import com.justb81.compassduel.ui.components.ActionEffectOverlay
 import com.justb81.compassduel.ui.components.CompassRing
+import com.justb81.compassduel.ui.components.ShieldIndicator
 
 private val SCREEN_PADDING_DP = 16.dp
 private val SECTION_SPACING_DP = 8.dp
@@ -59,6 +61,9 @@ private val HELP_CARD_PADDING_DP = 20.dp
 
 // Mirrors CompassRing's aspect ratio so the effect overlay shares its geometry.
 private const val COMPASS_ASPECT_RATIO = 1f
+
+// Diameter of the center shield indicator overlaid on the compass.
+private val SHIELD_INDICATOR_SIZE = 96.dp
 
 /**
  * Game screen — renders COUNTDOWN, PLAYING and ROUND_OVER phases.
@@ -179,7 +184,6 @@ private fun HelpOverlay(
                         R.string.game_help_aim_standard,
                         R.string.game_help_attack_standard,
                         R.string.game_help_shield_standard,
-                        R.string.game_help_dodge_standard,
                     )
                     GameMode.KIDS -> listOf(
                         R.string.game_help_aim_kids,
@@ -312,11 +316,18 @@ private fun PlayingContent(state: GameUiState.Playing) {
                     effect = state.actionEffect,
                     mode = state.mode,
                     shielding = state.shielding,
-                    dodging = state.dodging,
                     modifier = Modifier
                         .fillMaxWidth()
                         .aspectRatio(COMPASS_ASPECT_RATIO),
                 )
+                if (state.mode == GameMode.STANDARD) {
+                    ShieldIndicator(
+                        active = state.shielding,
+                        armProgress = state.shieldArmProgress,
+                        remainingFraction = state.shieldRemainingFraction,
+                        modifier = Modifier.size(SHIELD_INDICATOR_SIZE),
+                    )
+                }
             }
 
             // Bottom status line

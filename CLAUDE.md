@@ -7,11 +7,14 @@ this repository without re-analyzing the entire codebase each time.
 
 Compass Duel is a local, offline Android multiplayer game (2–4 players) that
 uses physical device orientation as its core mechanic. Players aim their phone
-at opponents via the magnetometer/gyroscope and attack, shield or dodge by
-tilting and shaking. All networking runs offline over the **Google Nearby
-Connections API** (P2P_STAR topology: one Host + N Clients). The Host is
-authoritative for hit detection — clients never decide hits, which prevents
-cheating. See `docs/game-spec.md` for the full concept and technical spec.
+at opponents via the magnetometer/gyroscope. There are two gestures: **Fire** (a
+quick swing/jerk toward the target) and **Shield** (hold the phone upright and
+steady for >1 s; limited to a per-round budget of 50% of the round time, enforced
+by the host and reported as `PlayerSnapshot.shieldRemainingMillis`). There is no
+dodge. All networking runs offline over the **Google Nearby Connections API**
+(P2P_STAR topology: one Host + N Clients). The Host is authoritative for hit
+detection — clients never decide hits, which prevents cheating. See
+`docs/game-spec.md` for the full concept and technical spec.
 
 A child-friendly variant, **Kids Mode ("Star Catchers")**, replaces combat
 with magic tag: no HP/damage/elimination, stars only go up, every player gets

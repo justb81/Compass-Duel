@@ -8,7 +8,7 @@ package com.justb81.compassduel.game.gesture
  * the accelerometer-minus-gravity calculation).
  *
  * @param timestampMillis Epoch millis when the sample was captured.
- * @param pitchDegrees Forward/backward tilt: positive = tilted forward (phone face up ↗).
+ * @param pitchDegrees Forward/backward tilt: 0 ≈ upright (screen toward the player).
  * @param rollDegrees Sideways tilt in degrees.
  * @param linearAccelMagnitude Net linear acceleration in m/s² (gravity removed).
  */
@@ -22,19 +22,13 @@ data class MotionSample(
 /**
  * Discrete gesture events that the classifier emits.
  *
- * Continuous posture (shield/bubble) is queried via [GestureClassifier.isShieldPosture]
- * rather than emitted as an event, since it is a sustained state rather than a one-shot action.
+ * Continuous shield posture is queried via [GestureClassifier.isShieldActive]
+ * rather than emitted as an event, since it is a sustained state rather than a
+ * one-shot action.
  */
 enum class GestureEvent {
-    /** Phone tilted forward beyond the pitch threshold with a simultaneous shake spike. */
-    ATTACK,
-
-    /**
-     * Phone pitch swung ≥25° in the direction opposite to the baseline pitch within
-     * 300 ms without a shake spike. Does not require the pitch to cross zero (e.g.
-     * +30° → +2° is a valid 28° reversal). Never emitted when dodge is disabled (Kids Mode).
-     */
-    DODGE,
+    /** A quick motion swing/jerk toward an opponent — fires in the current aim direction. */
+    FIRE,
 }
 
 /**
@@ -44,121 +38,131 @@ enum class GestureEvent {
  * adjusted without touching classifier logic.
  */
 object GestureThresholds {
-    /** Minimum pitch angle (degrees) required for an ATTACK gesture. */
-    const val ATTACK_PITCH_DEGREES = 20f
+    /** Maximum |pitch| (degrees) for the device to count as the upright shield posture. */
+    const val SHIELD_UPRIGHT_PITCH_DEGREES = 25f
 
-    /** Maximum |pitch| (degrees) for the device to be considered in shield posture. */
-    const val SHIELD_PITCH_DEGREES = 15f
+    /** Maximum linear acceleration (m/s²) for the device to count as "held steady". */
+    const val STEADY_ACCEL_MPS2 = 1.2f
 
-    /** Standard-mode shake threshold (m/s²): requires a firm, deliberate shake. */
-    const val STANDARD_SHAKE_MPS2 = 2.5f
+    /** Continuous time (ms) the device must be held upright and steady to activate the shield. */
+    const val SHIELD_HOLD_MILLIS = 1_000L
 
-    /** Minimum pitch swing (degrees) between two samples to classify a DODGE. */
-    const val DODGE_TILT_DELTA_DEGREES = 25f
+    /** Standard-mode swing threshold (m/s²): a deliberate jerk that fires. */
+    const val FIRE_SWING_MPS2 = 2.5f
 
-    /** Time window (ms) within which the pitch must reverse to count as a DODGE. */
-    const val DODGE_WINDOW_MILLIS = 300L
-
-    /** Minimum time (ms) that must pass between two consecutive ATTACK events. */
-    const val SHAKE_DEBOUNCE_MILLIS = 400L
+    /** Minimum time (ms) between two consecutive FIRE events. */
+    const val FIRE_DEBOUNCE_MILLIS = 500L
 }
 
 /**
- * Pure gesture classifier that converts a stream of [MotionSample] into discrete
- * [GestureEvent]s and a continuous shield-posture query.
+ * Pure gesture classifier that converts a stream of [MotionSample] into a discrete
+ * [GestureEvent.FIRE] and a continuous shield state.
  *
  * The classifier is completely sensor-free: it operates on already-computed
  * pitch/roll/accel values, making it straightforward to unit-test with synthetic
  * sample sequences.
  *
- * **ATTACK** fires when:
- * 1. `pitchDegrees > [GestureThresholds.ATTACK_PITCH_DEGREES]`, and
- * 2. `linearAccelMagnitude > [shakeThresholdMps2]`,
- * 3. subject to a [GestureThresholds.SHAKE_DEBOUNCE_MILLIS] debounce window.
+ * **Shield** activates after the device is held **upright (|pitch| ≤
+ * [GestureThresholds.SHIELD_UPRIGHT_PITCH_DEGREES]) and steady
+ * (linearAccel ≤ [GestureThresholds.STEADY_ACCEL_MPS2])** continuously for
+ * [GestureThresholds.SHIELD_HOLD_MILLIS] ms. Once active it stays active while the
+ * device remains upright; it drops on a FIRE swing or when the device leaves the
+ * upright band. Steadiness is required only to *arm* the timer, not to maintain an
+ * already-active shield. Shield is never armed when [shieldEnabled] is false (Kids Mode).
  *
- * **DODGE** fires when the pitch swings at least [GestureThresholds.DODGE_TILT_DELTA_DEGREES]
- * in the direction opposite to the previous sample's pitch within
- * [GestureThresholds.DODGE_WINDOW_MILLIS] ms, without a simultaneous shake spike.
- * The reversal is detected by sign: the swing direction must oppose the baseline pitch,
- * so +30 → +2 (28° back toward zero) qualifies without requiring a strict zero-crossing.
- * Never fires when [dodgeEnabled] is false.
+ * **FIRE** is emitted on a quick swing/jerk —
+ * `linearAccelMagnitude ≥ [fireSwingThresholdMps2]` — subject to a
+ * [GestureThresholds.FIRE_DEBOUNCE_MILLIS] debounce. A FIRE also drops the shield.
  *
- * **Shield posture** is a continuous boolean available via [isShieldPosture]: true when
- * |pitch| ≤ [GestureThresholds.SHIELD_PITCH_DEGREES].
- *
- * @param shakeThresholdMps2 Shake spike magnitude that triggers an ATTACK.
- *   Use [GestureThresholds.STANDARD_SHAKE_MPS2] for Standard Mode,
+ * @param fireSwingThresholdMps2 Swing magnitude that triggers a FIRE.
+ *   Use [GestureThresholds.FIRE_SWING_MPS2] for Standard Mode,
  *   [com.justb81.compassduel.game.kids.KidsRules.SHAKE_THRESHOLD_MPS2] for Kids Mode.
- * @param dodgeEnabled When false, DODGE events are never emitted (Kids Mode).
+ * @param shieldEnabled When false, the shield never arms (Kids Mode).
  */
 class GestureClassifier(
-    private val shakeThresholdMps2: Float,
-    private val dodgeEnabled: Boolean,
+    private val fireSwingThresholdMps2: Float,
+    private val shieldEnabled: Boolean,
 ) {
-    /** Epoch millis at which the last ATTACK event fired; 0 = never. */
-    private var lastAttackMillis: Long = 0L
+    /** Epoch millis at which the last FIRE event fired; 0 = never. */
+    private var lastFireMillis: Long = 0L
 
-    /** The most recent sample, retained for the dodge pitch-swing check. */
-    private var previousSample: MotionSample? = null
+    /** True while the shield is currently active. */
+    private var shieldActive: Boolean = false
+
+    /** Epoch millis at which the current continuous upright-and-steady hold began; null = not arming. */
+    private var uprightSteadySinceMillis: Long? = null
+
+    /** True while the shield is currently active (host-independent, local view). */
+    val isShieldActive: Boolean get() = shieldActive
 
     /**
      * Feeds one sensor sample into the classifier.
      *
-     * @return A [GestureEvent] if a gesture was detected, or null for normal motion.
+     * @return [GestureEvent.FIRE] when a swing fired, or null otherwise.
      */
     fun onSample(sample: MotionSample): GestureEvent? {
-        val prev = previousSample
-        previousSample = sample
-
-        // --- ATTACK detection ---
-        val isShakeSpike = sample.linearAccelMagnitude > shakeThresholdMps2
-        val isPitchedForward = sample.pitchDegrees > GestureThresholds.ATTACK_PITCH_DEGREES
-        val isDebounced = (sample.timestampMillis - lastAttackMillis) >= GestureThresholds.SHAKE_DEBOUNCE_MILLIS
-
-        if (isPitchedForward && isShakeSpike && isDebounced) {
-            lastAttackMillis = sample.timestampMillis
-            return GestureEvent.ATTACK
+        if (isSwing(sample) && isFireDebounced(sample.timestampMillis)) {
+            lastFireMillis = sample.timestampMillis
+            shieldActive = false
+            uprightSteadySinceMillis = null
+            return GestureEvent.FIRE
         }
 
-        // --- DODGE detection ---
-        // A DODGE is a large, rapid pitch reversal — the pitch must swing at least
-        // DODGE_TILT_DELTA_DEGREES in the direction opposite to the previous sample's
-        // pitch, within DODGE_WINDOW_MILLIS.  We detect direction reversal by checking
-        // that the swing direction (sign of delta) is opposite to the baseline pitch
-        // direction (sign of prev.pitchDegrees).  This correctly handles near-zero
-        // baselines (+30 → +2 is a reversal relative to +30) without requiring the
-        // pitch to actually cross zero.
-        if (dodgeEnabled && !isShakeSpike && prev != null) {
-            val withinWindow = (sample.timestampMillis - prev.timestampMillis) <= GestureThresholds.DODGE_WINDOW_MILLIS
-            val swingDelta = sample.pitchDegrees - prev.pitchDegrees
-            val isLargeSwing = kotlin.math.abs(swingDelta) >= GestureThresholds.DODGE_TILT_DELTA_DEGREES
-            // Reversal: the swing moved opposite to the direction of the baseline pitch.
-            // When prev is exactly zero the swing is still a valid reversal if it is large enough.
-            val isReversal = prev.pitchDegrees * swingDelta < 0f ||
-                (prev.pitchDegrees == 0f && isLargeSwing)
-
-            if (withinWindow && isReversal && isLargeSwing) {
-                return GestureEvent.DODGE
-            }
+        if (shieldEnabled) {
+            updateShield(sample)
         }
-
         return null
     }
 
-    /**
-     * Returns true when the current pitch indicates shield (or magic bubble) posture.
-     *
-     * This is a pure function of the current pitch value and does not depend on
-     * classifier state — call-sites may query it independently of [onSample].
-     *
-     * @param pitchDegrees The device's current pitch in degrees.
-     */
-    fun isShieldPosture(pitchDegrees: Float): Boolean =
-        kotlin.math.abs(pitchDegrees) <= GestureThresholds.SHIELD_PITCH_DEGREES
+    private fun updateShield(sample: MotionSample) {
+        if (!isUpright(sample)) {
+            uprightSteadySinceMillis = null
+            shieldActive = false
+            return
+        }
+        if (shieldActive) return
+        if (isSteady(sample)) {
+            val since = uprightSteadySinceMillis ?: sample.timestampMillis.also { uprightSteadySinceMillis = it }
+            if (sample.timestampMillis - since >= GestureThresholds.SHIELD_HOLD_MILLIS) {
+                shieldActive = true
+            }
+        } else {
+            // Motion broke the calm — the 1 s hold must accumulate again from scratch.
+            uprightSteadySinceMillis = null
+        }
+    }
 
-    /** Resets all internal classifier state (debounce timer, previous sample). */
+    /**
+     * Progress of the shield "loading" animation in `[0, 1]`.
+     *
+     * Returns 1 when the shield is active, the fraction of
+     * [GestureThresholds.SHIELD_HOLD_MILLIS] elapsed while arming, or 0 otherwise.
+     * This is a local-only signal for the UI; it never affects [onSample] output.
+     *
+     * @param nowMillis The current time used to measure arming progress.
+     */
+    fun shieldArmProgress(nowMillis: Long): Float {
+        if (shieldActive) return 1f
+        val since = uprightSteadySinceMillis ?: return 0f
+        return ((nowMillis - since).toFloat() / GestureThresholds.SHIELD_HOLD_MILLIS).coerceIn(0f, 1f)
+    }
+
+    private fun isSwing(sample: MotionSample): Boolean =
+        sample.linearAccelMagnitude >= fireSwingThresholdMps2
+
+    private fun isFireDebounced(nowMillis: Long): Boolean =
+        (nowMillis - lastFireMillis) >= GestureThresholds.FIRE_DEBOUNCE_MILLIS
+
+    private fun isUpright(sample: MotionSample): Boolean =
+        kotlin.math.abs(sample.pitchDegrees) <= GestureThresholds.SHIELD_UPRIGHT_PITCH_DEGREES
+
+    private fun isSteady(sample: MotionSample): Boolean =
+        sample.linearAccelMagnitude <= GestureThresholds.STEADY_ACCEL_MPS2
+
+    /** Resets all internal classifier state (debounce timer, shield, arming timer). */
     fun reset() {
-        lastAttackMillis = 0L
-        previousSample = null
+        lastFireMillis = 0L
+        shieldActive = false
+        uprightSteadySinceMillis = null
     }
 }
