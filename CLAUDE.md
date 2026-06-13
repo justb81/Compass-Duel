@@ -45,7 +45,7 @@ Compass-Duel/
 │   ├── build.gradle.kts        Applies compassduel.android.application + .detekt; GPP config
 │   ├── proguard-rules.pro
 │   └── src/main/java/com/justb81/compassduel/
-│       ├── CompassDuelApp.kt   @HiltAndroidApp entry point
+│       ├── CompassDuelApp.kt   @HiltAndroidApp entry point; ProcessLifecycleOwner observer calls session.leave() on app background
 │       ├── di/                 Hilt AppModule — Android framework + engine singleton bindings
 │       ├── game/               Pure game domain — Bearing/hit math, CommonModeEstimator, MovementPolicy (unit-tested)
 │       │   ├── kids/           Kids Mode domain — catch evaluation, star scoring, awards
@@ -56,7 +56,8 @@ Compass-Duel/
 │       │                       (decorator: ack/retransmit/dedup for control messages)
 │       │   └── protocol/       Nearby payload schema — NetMessage sealed hierarchy, MessageCodec
 │       │                       (canonical source for all on-wire message types)
-│       ├── sensor/             OrientationSensor, ShakeDetector, MovementDetector, InputPipeline
+│       ├── sensor/             OrientationSensor, ShakeDetector (hot shareIn flows), MovementDetector, InputPipeline
+│       │                       — sensor callbacks run on the shared @SensorHandler thread, off the main looper
 │       ├── session/            GameSession facade — host/client roles, SessionEvent, SessionRole
 │       ├── haptics/            HapticFeedback — mode-aware vibration wrapper (Standard / Kids)
 │       └── ui/

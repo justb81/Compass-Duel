@@ -4,9 +4,16 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Handler
+import com.justb81.compassduel.di.ApplicationScope
+import com.justb81.compassduel.di.SensorHandler
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.shareIn
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
@@ -30,19 +37,34 @@ data class AccelerometerSample(
 )
 
 /**
- * Produces a [Flow] of [AccelerometerSample] values from the device's accelerometer.
+ * Produces a hot, shared [Flow] of [AccelerometerSample] values from the device's accelerometer.
  *
- * Registers at [SensorManager.SENSOR_DELAY_GAME] and unregisters on cancellation.
+ * The physical sensor is registered once and fanned out to all collectors via [shareIn] (#72);
+ * listener callbacks are posted to the injected [SensorHandler] thread, off the main looper (#71).
  */
 @Singleton
 class ShakeDetector @Inject constructor(
     private val sensorManager: SensorManager,
+    @SensorHandler private val sensorHandler: Handler,
+    @ApplicationScope private val scope: CoroutineScope,
 ) {
 
     /**
-     * Cold [Flow] of accelerometer readings at [SensorManager.SENSOR_DELAY_GAME] rate.
+     * Hot, shared [Flow] of accelerometer readings at [SensorManager.SENSOR_DELAY_GAME] rate.
+     *
+     * [SharingStarted.WhileSubscribed] unregisters the physical sensor once the last collector
+     * leaves, after a short grace timeout to avoid churn across screen transitions.
      */
-    fun samples(): Flow<AccelerometerSample> = callbackFlow {
+    private val shared: SharedFlow<AccelerometerSample> = cold().shareIn(
+        scope = scope,
+        started = SharingStarted.WhileSubscribed(stopTimeoutMillis = SENSOR_STOP_TIMEOUT_MILLIS),
+        replay = 1,
+    )
+
+    /** Returns the shared accelerometer stream. */
+    fun samples(): Flow<AccelerometerSample> = shared
+
+    private fun cold(): Flow<AccelerometerSample> = callbackFlow {
         val accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
             ?: run { close(); return@callbackFlow }
 
@@ -59,7 +81,12 @@ class ShakeDetector @Inject constructor(
             override fun onAccuracyChanged(sensor: Sensor, accuracy: Int) = Unit
         }
 
-        sensorManager.registerListener(listener, accelSensor, SensorManager.SENSOR_DELAY_GAME)
+        sensorManager.registerListener(listener, accelSensor, SensorManager.SENSOR_DELAY_GAME, sensorHandler)
         awaitClose { sensorManager.unregisterListener(listener) }
+    }
+
+    companion object {
+        /** Grace period before the physical sensor is unregistered after the last collector leaves. */
+        private const val SENSOR_STOP_TIMEOUT_MILLIS = 2_000L
     }
 }

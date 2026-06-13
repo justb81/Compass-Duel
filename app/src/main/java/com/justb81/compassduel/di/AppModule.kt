@@ -2,6 +2,8 @@ package com.justb81.compassduel.di
 
 import android.content.Context
 import android.hardware.SensorManager
+import android.os.Handler
+import android.os.HandlerThread
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.datastore.core.DataStore
@@ -47,6 +49,17 @@ annotation class ApplicationScope
 annotation class GameLoopDispatcher
 
 /**
+ * Qualifier for the shared sensor-callback [Handler].
+ *
+ * All [android.hardware.SensorEventListener] registrations post their callbacks to this
+ * handler (a single background [HandlerThread]) so the rotation-matrix math runs off the
+ * main looper (#71). One thread serves every sensor.
+ */
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class SensorHandler
+
+/**
  * Process-wide Preferences DataStore delegate.
  *
  * Declared exactly once at top level and only ever read off the application context (via the
@@ -89,6 +102,19 @@ object AppModule {
     @Singleton
     fun provideSensorManager(@ApplicationContext context: Context): SensorManager =
         context.getSystemService(SensorManager::class.java)
+
+    /**
+     * Single background [Handler] that all sensor listeners post their callbacks to,
+     * so the rotation-matrix / magnitude math never runs on the main looper (#71).
+     * The [HandlerThread] lives for the whole process — it is never torn down.
+     */
+    @Provides
+    @Singleton
+    @SensorHandler
+    fun provideSensorHandler(): Handler {
+        val thread = HandlerThread("compass-sensors").apply { start() }
+        return Handler(thread.looper)
+    }
 
     @Provides
     @Singleton
