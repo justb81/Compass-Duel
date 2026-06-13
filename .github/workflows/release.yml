@@ -185,8 +185,11 @@ jobs:
 
       # -- Stage artefacts for the Play upload ----------------------------
       # Gradle Play Publisher's artifactDir mode uploads every AAB it finds in
-      # the given directory and pairs a sibling `<name>.mapping.txt` as the
-      # per-versionCode deobfuscation file.
+      # the given directory. For App Bundles the R8 deobfuscation mapping and the
+      # native debug symbols are embedded inside the .aab itself by AGP (the
+      # latter via debugSymbolLevel on the release build type) and travel to Play
+      # with the bundle — GPP does not upload a sibling mapping/symbols file for
+      # AABs. So only the .aab needs staging here.
       - name: Stage Play artifacts
         if: steps.keystore.outputs.available == 'true'
         run: |
@@ -195,9 +198,6 @@ jobs:
           [ -f "$AAB" ] || AAB=$(ls app/build/outputs/bundle/release/*.aab 2>/dev/null | head -n1 || true)
           if [ -n "$AAB" ] && [ -f "$AAB" ]; then
             cp "$AAB" "play-artifacts/app.aab"
-            if [ -f "app/build/outputs/mapping/release/mapping.txt" ]; then
-              cp "app/build/outputs/mapping/release/mapping.txt" "play-artifacts/app.mapping.txt"
-            fi
           fi
           ls -lh play-artifacts/
 

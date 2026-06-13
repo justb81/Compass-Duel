@@ -22,16 +22,6 @@ val keystoreFile = providers.environmentVariable("KEYSTORE_FILE").orNull?.takeIf
 android {
     compileSdk = 37
 
-    defaultConfig {
-        // Package native debug symbols into the AAB so Google Play Console can
-        // symbolicate native stack traces. FULL is required — SYMBOL_TABLE strips
-        // line numbers and Play Console still flags the bundle as "no symbols for
-        // debugging".
-        ndk {
-            debugSymbolLevel = "FULL"
-        }
-    }
-
     if (keystoreFile != null) {
         signingConfigs {
             create("release") {
@@ -58,6 +48,17 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Embed native debug symbols in the AAB so Google Play Console can
+            // symbolicate crashes/ANRs from the native libraries pulled in by
+            // dependencies (e.g. play-services-nearby). AGP embeds these into the
+            // bundle only when debugSymbolLevel is set on the release build type —
+            // not on defaultConfig, which still emits the standalone zip but leaves
+            // the bundle without the BUNDLE-METADATA debug-symbols entry Play reads.
+            // FULL keeps file names + line numbers; the symbol footprint is well
+            // under the 300 MB Play limit for this app.
+            ndk {
+                debugSymbolLevel = "FULL"
+            }
             signingConfig = if (keystoreFile != null) {
                 signingConfigs.getByName("release")
             } else {
