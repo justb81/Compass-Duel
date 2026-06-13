@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/justb81/Compass-Duel/compare/v0.3.0...v0.3.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **net:** prevent crash when starting host (or client) over Nearby ([#19](https://github.com/justb81/Compass-Duel/issues/19)) ([7ee12bd](https://github.com/justb81/Compass-Duel/commit/7ee12bd58d77fa2f077178ca8a812e068468b45b)), closes [#17](https://github.com/justb81/Compass-Duel/issues/17)
+* resolve Android Lint warnings on the v1 sources ([#16](https://github.com/justb81/Compass-Duel/issues/16)) ([bfd1684](https://github.com/justb81/Compass-Duel/commit/bfd1684313a8f52c0840fa0ace4ff03fc8bb03a5))
+
 ## [0.3.0](https://github.com/justb81/Compass-Duel/compare/v0.2.0...v0.3.0) (2026-06-13)
 
 
