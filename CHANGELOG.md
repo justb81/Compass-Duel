@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/justb81/Compass-Duel/compare/v0.4.2...v0.5.0) (2026-06-13)
+
+
+### Features
+
+* implement play-session improvements ([#29](https://github.com/justb81/Compass-Duel/issues/29), [#30](https://github.com/justb81/Compass-Duel/issues/30), [#31](https://github.com/justb81/Compass-Duel/issues/31), [#32](https://github.com/justb81/Compass-Duel/issues/32), [#34](https://github.com/justb81/Compass-Duel/issues/34)) ([#36](https://github.com/justb81/Compass-Duel/issues/36)) ([7480db0](https://github.com/justb81/Compass-Duel/commit/7480db0151cf79bb21feb037caad1e7e8c9acd61))
+
 ## [0.4.2](https://github.com/justb81/Compass-Duel/compare/v0.4.1...v0.4.2) (2026-06-13)
 
 
