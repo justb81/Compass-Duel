@@ -20,10 +20,6 @@
     <string name="peer_lost_message">The connection to the other device was lost. You have been returned to the home screen.</string>
     <string name="peer_lost_ok">OK</string>
 
-    <!-- Screen placeholders -->
-    <string name="placeholder_game_screen">Game screen — coming soon</string>
-    <string name="placeholder_results_screen">Results screen — coming soon</string>
-
     <!-- Lobby screen — shared -->
     <string name="lobby_title_host">Lobby (Host)</string>
     <string name="lobby_title_client">Lobby</string>
@@ -33,17 +29,11 @@
     <string name="lobby_character_header">Choose your character</string>
     <string name="lobby_start_button">Start game</string>
     <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
-    <string name="lobby_start_error_players">Need 2–4 players to start.</string>
-    <string name="lobby_start_error_seats">All players must choose a seat.</string>
-    <string name="lobby_start_error_elements">All players must choose an element.</string>
-    <string name="lobby_start_error_duplicate_seats">Two players cannot share a seat.</string>
-    <string name="lobby_start_error_duplicate_elements">Each player must choose a unique element.</string>
 
     <!-- Lobby — client discovery -->
     <string name="lobby_searching">Searching for nearby hosts…</string>
     <string name="lobby_no_hosts_found">No hosts found yet. Make sure the host has started a game.</string>
     <string name="lobby_connect_button">Connect</string>
-    <string name="lobby_connected_waiting">Connected — waiting for lobby…</string>
 
     <!-- Seat grid -->
     <string name="seat_grid_cell_content_description">Seat %1$d</string>
@@ -63,8 +53,6 @@
     <string name="sprite_3">Comet</string>
 
     <!-- Player badge -->
-    <string name="player_badge_ready">Ready</string>
-    <string name="player_badge_not_ready">Not ready</string>
     <string name="player_badge_seat">Seat %1$d</string>
     <string name="player_badge_no_seat">No seat</string>
 
@@ -77,7 +65,6 @@
     <string name="game_status_ready">Ready</string>
     <string name="game_eliminated_spectating">You have been eliminated.\nWatch the remaining players.</string>
     <string name="game_timer_label">%1$ds</string>
-    <string name="game_round_wins">Wins: %1$d</string>
 
     <!-- Results screen -->
     <string name="results_title">Round Results</string>
@@ -85,7 +72,10 @@
     <string name="results_round_draw">Round draw!</string>
     <string name="results_match_winner">🏆 %1$s wins the match!</string>
     <string name="results_scores_header">Match Score</string>
-    <string name="results_wins_count">%1$d win(s)</string>
+    <plurals name="results_wins_count">
+        <item quantity="one">%1$d win</item>
+        <item quantity="other">%1$d wins</item>
+    </plurals>
     <string name="results_kids_celebration">Amazing round, everyone! 🌟</string>
     <string name="results_award_star_champion">Star Champion</string>
     <string name="results_award_bubble_hero">Bubble Hero</string>

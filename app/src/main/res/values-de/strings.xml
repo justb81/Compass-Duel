@@ -20,10 +20,6 @@
     <string name="peer_lost_message">Die Verbindung zum anderen Gerät wurde unterbrochen. Du wurdest zum Startbildschirm zurückgeleitet.</string>
     <string name="peer_lost_ok">OK</string>
 
-    <!-- Screen placeholders -->
-    <string name="placeholder_game_screen">Spielbildschirm — kommt bald</string>
-    <string name="placeholder_results_screen">Ergebnisbildschirm — kommt bald</string>
-
     <!-- Lobby screen — shared -->
     <string name="lobby_title_host">Lobby (Host)</string>
     <string name="lobby_title_client">Lobby</string>
@@ -33,17 +29,11 @@
     <string name="lobby_character_header">Charakter wählen</string>
     <string name="lobby_start_button">Spiel starten</string>
     <string name="lobby_waiting_for_host">Warte auf den Host …</string>
-    <string name="lobby_start_error_players">Es werden 2–4 Spieler benötigt.</string>
-    <string name="lobby_start_error_seats">Alle Spieler müssen einen Platz wählen.</string>
-    <string name="lobby_start_error_elements">Alle Spieler müssen ein Element wählen.</string>
-    <string name="lobby_start_error_duplicate_seats">Zwei Spieler können nicht denselben Platz wählen.</string>
-    <string name="lobby_start_error_duplicate_elements">Jeder Spieler muss ein anderes Element wählen.</string>
 
     <!-- Lobby — client discovery -->
     <string name="lobby_searching">Suche nach Hosts in der Nähe …</string>
     <string name="lobby_no_hosts_found">Noch kein Host gefunden. Stelle sicher, dass der Host ein Spiel gestartet hat.</string>
     <string name="lobby_connect_button">Verbinden</string>
-    <string name="lobby_connected_waiting">Verbunden — warte auf Lobby …</string>
 
     <!-- Seat grid -->
     <string name="seat_grid_cell_content_description">Platz %1$d</string>
@@ -63,8 +53,6 @@
     <string name="sprite_3">Komet</string>
 
     <!-- Player badge -->
-    <string name="player_badge_ready">Bereit</string>
-    <string name="player_badge_not_ready">Nicht bereit</string>
     <string name="player_badge_seat">Platz %1$d</string>
     <string name="player_badge_no_seat">Kein Platz</string>
 
@@ -77,7 +65,6 @@
     <string name="game_status_ready">Bereit</string>
     <string name="game_eliminated_spectating">Du wurdest ausgeschieden.\nBeobachte die verbleibenden Spieler.</string>
     <string name="game_timer_label">%1$ds</string>
-    <string name="game_round_wins">Siege: %1$d</string>
 
     <!-- Results screen -->
     <string name="results_title">Rundenergebnis</string>
@@ -85,7 +72,10 @@
     <string name="results_round_draw">Unentschieden!</string>
     <string name="results_match_winner">🏆 %1$s gewinnt das Match!</string>
     <string name="results_scores_header">Match-Punktestand</string>
-    <string name="results_wins_count">%1$d Sieg(e)</string>
+    <plurals name="results_wins_count">
+        <item quantity="one">%1$d Sieg</item>
+        <item quantity="other">%1$d Siege</item>
+    </plurals>
     <string name="results_kids_celebration">Tolle Runde, alle! 🌟</string>
     <string name="results_award_star_champion">Sternen-Champion</string>
     <string name="results_award_bubble_hero">Blasen-Held</string>
