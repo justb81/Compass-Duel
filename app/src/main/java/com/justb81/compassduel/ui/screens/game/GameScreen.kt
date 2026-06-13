@@ -1,7 +1,9 @@
 package com.justb81.compassduel.ui.screens.game
 
-import android.view.WindowManager
-import androidx.activity.compose.LocalActivity
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
+import android.view.ViewTreeObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -30,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -79,7 +82,8 @@ fun GameScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
-    KeepScreenOnAndImmersive()
+    KeepScreenOn()
+    ImmersiveFullScreen()
 
     // Help overlay visibility is screen-local and default-collapsed; it is
     // toggled by the "?" affordance and dismissed by tapping the scrim.
@@ -213,32 +217,72 @@ private fun HelpOverlay(
 }
 
 /**
- * Side effect tied to the [GameScreen] lifecycle: keeps the screen awake and
- * enters immersive full-screen (status + navigation bars hidden) for the whole
- * time the game screen is shown, then reverses both on dispose.
+ * Side effect tied to the [GameScreen] lifecycle: keeps the screen awake for the
+ * whole time the game screen is shown, then releases it on dispose. During a
+ * round the player moves the phone instead of touching the display, so without
+ * this the screen would dim or the device would auto-lock mid-match.
+ *
+ * Keyed on [LocalView] (always non-null inside a composition and guaranteed to
+ * belong to the real window): setting [android.view.View.setKeepScreenOn]
+ * applies `FLAG_KEEP_SCREEN_ON` to the host window without depending on
+ * resolving the Activity.
  *
  * Disposal fires whenever the [GameRoute] composable leaves the back stack —
  * navigating to results/lobby, back navigation, or a peer-lost teardown — so
- * the screen never stays awake or full-screen indefinitely.
+ * the screen never stays awake indefinitely.
  */
 @Composable
-private fun KeepScreenOnAndImmersive() {
-    val activity = LocalActivity.current ?: return
+private fun KeepScreenOn() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        view.keepScreenOn = true
+        onDispose { view.keepScreenOn = false }
+    }
+}
 
-    DisposableEffect(activity) {
-        val window = activity.window
-        val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+/**
+ * Side effect tied to the [GameScreen] lifecycle: enters immersive full-screen
+ * (status + navigation bars hidden) for the whole time the game screen is shown,
+ * then restores the bars on dispose. System UI is distracting during a
+ * physical-movement game and an accidental swipe on the bars can interrupt play.
+ *
+ * The window is resolved from [LocalView]'s context (unwrapping any
+ * [ContextWrapper]s) rather than via `LocalActivity`. The hide is re-applied on
+ * window-focus regain because Android re-shows the bars after focus loss and
+ * window settle — the common reason a one-shot `hide()` does not stick under
+ * `enableEdgeToEdge`.
+ */
+@Composable
+private fun ImmersiveFullScreen() {
+    val view = LocalView.current
+    DisposableEffect(view) {
+        val window = view.context.findActivity()?.window
+        if (window == null) {
+            onDispose { }
+        } else {
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            controller.systemBarsBehavior =
+                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(WindowInsetsCompat.Type.systemBars())
 
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        insetsController.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        insetsController.hide(WindowInsetsCompat.Type.systemBars())
+            val focusListener = ViewTreeObserver.OnWindowFocusChangeListener { hasFocus ->
+                if (hasFocus) controller.hide(WindowInsetsCompat.Type.systemBars())
+            }
+            view.viewTreeObserver.addOnWindowFocusChangeListener(focusListener)
 
-        onDispose {
-            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-            insetsController.show(WindowInsetsCompat.Type.systemBars())
+            onDispose {
+                view.viewTreeObserver.removeOnWindowFocusChangeListener(focusListener)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
         }
     }
+}
+
+/** Unwraps [ContextWrapper]s to find the host [Activity], or null if none. */
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
 
 // -------------------------------------------------------------------------
