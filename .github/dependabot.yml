@@ -20,3 +20,11 @@ updates:
         versions: [">= 2.4.0"]
       - dependency-name: "org.jetbrains.kotlin.plugin.*"
         versions: [">= 2.4.0"]
+
+  # GitHub Actions are SHA-pinned in the workflows; this keeps the pins from
+  # going stale and missing upstream security patches. Covers both
+  # .github/workflows/**/*.yml and the composite actions under .github/actions/.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"

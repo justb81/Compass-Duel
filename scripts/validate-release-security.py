@@ -78,6 +78,15 @@ def main() -> None:
                 "on a Gradle step. Write the JSON to a temp file (e.g. /tmp/gpp-sa.json) and pass "
                 "GOOGLE_PLAY_SERVICE_ACCOUNT_FILE instead."
             )
+        # 3b. No '${{ ... }}' interpolation directly in a Gradle step's run: —
+        #     that is a command-injection sink in the job that holds signing
+        #     secrets. Pass values via env: and reference shell variables instead.
+        if "${{" in gradle_step.get("run", ""):
+            fail(
+                f"Gradle step {gradle_step.get('name', '<unnamed>')!r} interpolates '${{{{ ... }}}}' "
+                "directly into its run: command. Pass the value via env: and reference it as a shell "
+                "variable (e.g. \"$PLAY_TRACK\") to avoid a command-injection sink."
+            )
 
     # 4. A cleanup step must run with `if: always()` and remove both the
     #    keystore and the Play SA file so secrets never persist on a reused runner.
