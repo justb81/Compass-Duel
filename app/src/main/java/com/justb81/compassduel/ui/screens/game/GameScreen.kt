@@ -1,5 +1,7 @@
 package com.justb81.compassduel.ui.screens.game
 
+import android.view.WindowManager
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -13,6 +15,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -20,6 +23,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.justb81.compassduel.BuildConfig
@@ -51,11 +56,42 @@ fun GameScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    KeepScreenOnAndImmersive()
+
     Box(modifier = Modifier.fillMaxSize()) {
         when (val state = uiState) {
             is GameUiState.Countdown -> CountdownContent(state)
             is GameUiState.Playing -> PlayingContent(state)
             GameUiState.RoundOver -> RoundOverContent()
+        }
+    }
+}
+
+/**
+ * Side effect tied to the [GameScreen] lifecycle: keeps the screen awake and
+ * enters immersive full-screen (status + navigation bars hidden) for the whole
+ * time the game screen is shown, then reverses both on dispose.
+ *
+ * Disposal fires whenever the [GameRoute] composable leaves the back stack —
+ * navigating to results/lobby, back navigation, or a peer-lost teardown — so
+ * the screen never stays awake or full-screen indefinitely.
+ */
+@Composable
+private fun KeepScreenOnAndImmersive() {
+    val activity = LocalActivity.current ?: return
+
+    DisposableEffect(activity) {
+        val window = activity.window
+        val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        insetsController.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        insetsController.hide(WindowInsetsCompat.Type.systemBars())
+
+        onDispose {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            insetsController.show(WindowInsetsCompat.Type.systemBars())
         }
     }
 }
