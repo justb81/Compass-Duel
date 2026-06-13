@@ -316,6 +316,7 @@ class GameSessionTest {
     fun `client receives LobbyState and updates lobby flow`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
+        session.connectTo("host-ep")
         yield()
 
         val lobbyState = NetMessage.LobbyState(
@@ -333,6 +334,7 @@ class GameSessionTest {
     fun `client receives RoundStart and emits RoundStarted event`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
+        session.connectTo("host-ep")
         yield()
 
         session.sessionEvents.test {
@@ -356,6 +358,7 @@ class GameSessionTest {
     fun `client receives Rematch and emits RematchRequested event`() = testScope.runTest {
         val session = buildSession()
         session.joinLobby(playerName = "Bob")
+        session.connectTo("host-ep")
         yield()
 
         session.sessionEvents.test {
