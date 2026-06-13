@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.0](https://github.com/justb81/Compass-Duel/compare/v0.5.1...v0.6.0) (2026-06-13)
+
+
+### Features
+
+* **gesture:** swing-to-Fire + hold-upright Shield with budget; remove Dodge ([#82](https://github.com/justb81/Compass-Duel/issues/82)) ([2ba8992](https://github.com/justb81/Compass-Duel/commit/2ba89926d23eae1b433a130a666cbec5e497e1e1))
+* replace manual seat selection with a "bow to greet" handshake ([#85](https://github.com/justb81/Compass-Duel/issues/85)) ([eafc883](https://github.com/justb81/Compass-Duel/commit/eafc883cec55d978c560853e40c37f2f3f430340))
+
+
+### Bug Fixes
+
+* **game:** make keep-screen-on and immersive full-screen actually take effect ([#84](https://github.com/justb81/Compass-Duel/issues/84)) ([a6fee8b](https://github.com/justb81/Compass-Duel/commit/a6fee8b9af4784d18882799739399b5ac5fa941e))
+
 ## [0.5.1](https://github.com/justb81/Compass-Duel/compare/v0.5.0...v0.5.1) (2026-06-13)
 
 
