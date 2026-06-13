@@ -103,12 +103,17 @@
     <string name="game_help_aim_standard">Zielen: Richte dein Handy auf einen Gegner im Kompassring.</string>
     <string name="game_help_attack_standard">Feuern: Ziele auf einen Gegner und schwinge das Handy kurz.</string>
     <string name="game_help_shield_standard">Schild: Halte das Handy eine Sekunde aufrecht und ruhig. Du kannst die Hälfte der Runde schützen.</string>
+    <string name="game_help_touch_standard">Lieber weniger Bewegung? Tippe zweimal auf den Bildschirm zum Feuern und halte stattdessen die Schild-Taste gedrückt.</string>
     <string name="game_help_title_kids">So wird gespielt</string>
     <string name="game_help_aim_kids">Zielen: Richte dein Handy auf eine Freundin oder einen Freund im Ring — der Bereich ist schön groß.</string>
     <string name="game_help_toss_kids">Funkeln werfen: Kippe dein Handy nach vorne und wackle ein bisschen.</string>
-    <string name="game_help_bubble_kids">Zauberblase: Halte dein Handy flach, um eine Blase zu machen und einen Stern zu verdienen.</string>
+    <string name="game_help_bubble_kids">Zauberblase: Halte die Blasen-Taste gedrückt, um eine Blase zu machen und einen Stern zu verdienen.</string>
+    <string name="game_help_touch_kids">Lieber weniger Bewegung? Tippe zweimal auf den Bildschirm, um Funkeln zu werfen, und halte stattdessen die Blasen-Taste gedrückt.</string>
     <string name="game_help_rest_kids">Ausruhen: Nachdem du gefangen wurdest, ruhst du dich kurz aus und bist dann wieder dabei!</string>
     <string name="game_help_dismiss_hint">Zum Schließen irgendwo tippen</string>
+    <!-- Inhaltsbeschreibungen für die Halte-Taste zum Schützen -->
+    <string name="game_shield_button_hold">Zum Schützen gedrückt halten</string>
+    <string name="game_bubble_button_hold">Halten, um eine Blase zu machen</string>
 
     <!-- Results screen -->
     <string name="results_title">Rundenergebnis</string>

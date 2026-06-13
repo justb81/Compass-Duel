@@ -10,7 +10,11 @@ uses physical device orientation as its core mechanic. Players aim their phone
 at opponents via the magnetometer/gyroscope. There are two gestures: **Fire** (a
 quick swing/jerk toward the target) and **Shield** (hold the phone upright and
 steady for >1 s; limited to a per-round budget of 50% of the round time, enforced
-by the host and reported as `PlayerSnapshot.shieldRemainingMillis`). There is no
+by the host and reported as `PlayerSnapshot.shieldRemainingMillis`). For
+accessibility, **always-available touch controls** run alongside the gestures
+(no toggle): double-tap the play area to Fire and hold an on-screen button to
+Shield. `InputPipeline` folds both into the same `PlayerInput` stream, so the
+host is source-agnostic. There is no
 dodge. Relative positions are established by a **"bow to greet" handshake** in the
 lobby (each player aims at every opponent and bows; the host stores the captured
 absolute bearings in `GameSession.bearingMatrix`) — there is no manual seat grid and

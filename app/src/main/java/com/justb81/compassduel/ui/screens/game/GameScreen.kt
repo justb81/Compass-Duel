@@ -6,6 +6,7 @@ import android.content.ContextWrapper
 import android.view.ViewTreeObserver
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -31,7 +33,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -68,6 +72,10 @@ private const val COMPASS_ASPECT_RATIO = 1f
 // Diameter of the center shield indicator overlaid on the compass.
 private val SHIELD_INDICATOR_SIZE = 96.dp
 
+// Diameter of the hold-to-shield touch button below the compass.
+private val SHIELD_BUTTON_SIZE = 72.dp
+private const val SHIELD_BUTTON_IDLE_ALPHA = 0.35f
+
 /**
  * Game screen — renders COUNTDOWN, PLAYING and ROUND_OVER phases.
  *
@@ -92,7 +100,11 @@ fun GameScreen(
     Box(modifier = Modifier.fillMaxSize()) {
         when (val state = uiState) {
             is GameUiState.Countdown -> CountdownContent(state)
-            is GameUiState.Playing -> PlayingContent(state)
+            is GameUiState.Playing -> PlayingContent(
+                state = state,
+                onFire = viewModel::fireTouch,
+                onShieldPressChange = viewModel::setTouchShield,
+            )
             GameUiState.RoundOver -> RoundOverContent()
         }
 
@@ -188,11 +200,13 @@ private fun HelpOverlay(
                         R.string.game_help_aim_standard,
                         R.string.game_help_attack_standard,
                         R.string.game_help_shield_standard,
+                        R.string.game_help_touch_standard,
                     )
                     GameMode.KIDS -> listOf(
                         R.string.game_help_aim_kids,
                         R.string.game_help_toss_kids,
                         R.string.game_help_bubble_kids,
+                        R.string.game_help_touch_kids,
                         R.string.game_help_rest_kids,
                     )
                 }
@@ -323,7 +337,11 @@ private fun CountdownContent(state: GameUiState.Countdown) {
 // -------------------------------------------------------------------------
 
 @Composable
-private fun PlayingContent(state: GameUiState.Playing) {
+private fun PlayingContent(
+    state: GameUiState.Playing,
+    onFire: () -> Unit,
+    onShieldPressChange: (Boolean) -> Unit,
+) {
     Box(modifier = Modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -340,13 +358,22 @@ private fun PlayingContent(state: GameUiState.Playing) {
             // Compass ring — ring rotates with local sensor at full rate.
             // The action-effect overlay is layered directly on top of the ring
             // and shares its geometry so projectiles/impacts land on the reticle.
+            //
+            // Double-tapping anywhere on the compass area fires (touch alternative to
+            // the swing gesture). The detector lives on this box — not the whole
+            // screen — so it stays clear of the hold-to-shield button below and the
+            // help "?" affordance the parent draws on top.
             val warningColor = if (state.mode == GameMode.STANDARD) {
                 Color.Red
             } else {
                 WARNING_COLOR_KIDS
             }
             Box(
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .pointerInput(state.isEliminated) {
+                        detectTapGestures(onDoubleTap = { if (!state.isEliminated) onFire() })
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 CompassRing(
@@ -372,6 +399,19 @@ private fun PlayingContent(state: GameUiState.Playing) {
                         modifier = Modifier.size(SHIELD_INDICATOR_SIZE),
                     )
                 }
+            }
+
+            // Hold-to-shield button (touch alternative to the upright-hold gesture).
+            // Hidden once eliminated — a spectator has nothing to shield.
+            if (!(state.isEliminated && state.mode == GameMode.STANDARD)) {
+                ShieldHoldButton(
+                    mode = state.mode,
+                    active = state.shielding,
+                    onPressChange = onShieldPressChange,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .padding(bottom = SECTION_SPACING_DP),
+                )
             }
 
             // Bottom status line
@@ -494,6 +534,65 @@ private fun KidsHud(state: GameUiState.Playing) {
                 )
             }
         }
+    }
+}
+
+// -------------------------------------------------------------------------
+// Hold-to-shield touch button
+// -------------------------------------------------------------------------
+
+/**
+ * Press-and-hold button that raises the shield (Standard) or magic bubble (Kids)
+ * for as long as it is held — the touch alternative to the upright-hold gesture.
+ *
+ * Always shown alongside the motion gestures so a player can pick whichever feels
+ * better. The host still enforces the shield budget (Standard) and authoritatively
+ * decides blocks, so this control only reports intent. [active] brightens the glyph
+ * while the host confirms the shield is up; a local pressed flag gives an immediate
+ * touch-down highlight even before the next snapshot arrives.
+ *
+ * @param mode Active game mode; selects the glyph and label.
+ * @param active Whether the host reports the shield/bubble as currently up.
+ * @param onPressChange Invoked with true on press and false on release/cancel.
+ */
+@Composable
+private fun ShieldHoldButton(
+    mode: GameMode,
+    active: Boolean,
+    onPressChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var pressed by remember { mutableStateOf(false) }
+    val glyph = if (mode == GameMode.KIDS) "🫧" else "🛡️"
+    val description = stringResource(
+        if (mode == GameMode.KIDS) R.string.game_bubble_button_hold else R.string.game_shield_button_hold,
+    )
+    val highlighted = pressed || active
+    val containerColor = if (highlighted) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.primary.copy(alpha = SHIELD_BUTTON_IDLE_ALPHA)
+    }
+    Box(
+        modifier = modifier
+            .size(SHIELD_BUTTON_SIZE)
+            .clip(CircleShape)
+            .background(containerColor)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        onPressChange(true)
+                        tryAwaitRelease()
+                        pressed = false
+                        onPressChange(false)
+                    },
+                )
+            }
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(text = glyph, style = MaterialTheme.typography.headlineSmall)
     }
 }
 

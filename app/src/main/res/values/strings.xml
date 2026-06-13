@@ -103,12 +103,17 @@
     <string name="game_help_aim_standard">Aim: point your phone at an opponent on the compass ring.</string>
     <string name="game_help_attack_standard">Fire: aim at an opponent and give your phone a quick swing.</string>
     <string name="game_help_shield_standard">Shield: hold the phone upright and steady for a second. You can shield for half the round.</string>
+    <string name="game_help_touch_standard">Prefer less movement? Double-tap the screen to fire, and hold the shield button instead.</string>
     <string name="game_help_title_kids">How to play</string>
     <string name="game_help_aim_kids">Aim: point your phone at a friend on the ring — the cone is nice and wide.</string>
     <string name="game_help_toss_kids">Toss a sparkle: tilt your phone forward and give it a little wiggle.</string>
-    <string name="game_help_bubble_kids">Magic bubble: hold your phone flat to make a bubble and earn a star.</string>
+    <string name="game_help_bubble_kids">Magic bubble: hold the bubble button to make a bubble and earn a star.</string>
+    <string name="game_help_touch_kids">Prefer less movement? Double-tap the screen to toss a sparkle, and hold the bubble button instead.</string>
     <string name="game_help_rest_kids">Rest: after you are caught you take a short rest, then you are back!</string>
     <string name="game_help_dismiss_hint">Tap anywhere to close</string>
+    <!-- Hold-to-shield touch button content descriptions -->
+    <string name="game_shield_button_hold">Hold to shield</string>
+    <string name="game_bubble_button_hold">Hold to make a bubble</string>
 
     <!-- Results screen -->
     <string name="results_title">Round Results</string>

@@ -23,7 +23,9 @@ import com.justb81.compassduel.ui.components.ActionEffect
 import com.justb81.compassduel.ui.components.ActionEffectKind
 import com.justb81.compassduel.ui.components.CompassTarget
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -185,6 +187,19 @@ class GameViewModel @Inject constructor(
     // rate so the center shield indicator can animate its "loading" ring.
     private var latestShieldArmProgress = 0f
 
+    // Touch-mode input (always available alongside the motion gestures).
+    // Whether the on-screen shield/bubble button is currently held; read by the
+    // InputPipeline each cadence tick and OR-ed with the gesture shield.
+    private val touchShieldHeld = MutableStateFlow(false)
+
+    // One emission per on-screen fire (double-tap); the InputPipeline turns each
+    // into an immediate ATTACK. extraBufferCapacity + DROP_OLDEST keeps tryEmit
+    // non-suspending and lossless for the bursty taps a player can produce.
+    private val touchFireRequests = MutableSharedFlow<Unit>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
     // Last processed snapshot sequence number (to avoid re-processing haptics)
     private var lastHapticSeq = -1
 
@@ -270,6 +285,8 @@ class GameViewModel @Inject constructor(
                                 mode = mode,
                                 onInput = session::submitLocalInput,
                                 onShieldArmProgress = { latestShieldArmProgress = it },
+                                touchShieldHeld = { touchShieldHeld.value },
+                                touchFireEvents = touchFireRequests,
                             )
                         }
                         // Dispatch haptics for new events
@@ -578,6 +595,28 @@ class GameViewModel @Inject constructor(
     }
 
     // -------------------------------------------------------------------------
+    // Touch-mode input (on-screen controls, always available)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Reports the on-screen shield/bubble button's held state. While true, the
+     * [InputPipeline] reports the local player as shielding (Standard) or in a
+     * magic bubble (Kids), in addition to the motion-gesture shield.
+     */
+    fun setTouchShield(held: Boolean) {
+        touchShieldHeld.value = held
+    }
+
+    /**
+     * Requests a single touch fire (double-tap). The [InputPipeline] emits an
+     * ATTACK with the latest aim; the host enforces the per-mode cooldown, so
+     * rapid taps cannot fire faster than a swing.
+     */
+    fun fireTouch() {
+        touchFireRequests.tryEmit(Unit)
+    }
+
+    // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
 
@@ -586,6 +625,8 @@ class GameViewModel @Inject constructor(
             inputPipeline.stop()
             pipelineStarted = false
         }
+        // Clear any held touch shield so it never leaks across rounds.
+        touchShieldHeld.value = false
     }
 
     override fun onCleared() {
