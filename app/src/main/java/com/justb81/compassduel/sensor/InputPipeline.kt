@@ -12,6 +12,7 @@ import com.justb81.compassduel.net.protocol.PlayerAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
@@ -25,9 +26,21 @@ import javax.inject.Inject
  * - **Every [CADENCE_MILLIS] ms**: emits the latest aim/pitch/shield state (action = IDLE or SHIELD).
  * - **Immediately on a FIRE swing**: emits ATTACK without waiting for the next cadence tick.
  *
+ * ### Touch-mode coexistence (accessibility)
+ * On-screen touch controls run *alongside* the motion gestures, never instead of
+ * them, so a player can switch at any moment. Touch input is folded into this same
+ * single producer rather than emitting its own [NetMessage.PlayerInput] stream, so
+ * the host always sees one consistent cadence message:
+ * - A touch **fire** ([touchFireEvents] emission) emits an ATTACK immediately,
+ *   reusing the latest known aim — exactly like a swing.
+ * - A touch **shield** (held button, read via [touchShieldHeld]) is OR-ed with the
+ *   gesture shield in the cadence emission. This is also how Kids Mode reaches its
+ *   magic-bubble posture, since the gesture shield is disabled there.
+ *
  * ### Mode configuration
  * - **Standard**: [GestureThresholds.FIRE_SWING_MPS2] swing threshold; shield enabled.
- * - **Kids**: [KidsRules.SHAKE_THRESHOLD_MPS2] swing threshold; shield disabled.
+ * - **Kids**: [KidsRules.SHAKE_THRESHOLD_MPS2] swing threshold; gesture shield disabled
+ *   (the magic bubble is raised only via the touch button).
  *
  * ### Merge-stream design (Issue #70)
  * Orientation and accelerometer samples are merged into a single typed event stream via
@@ -64,13 +77,20 @@ class InputPipeline @Inject constructor(
      * @param onInput Callback invoked for each produced [NetMessage.PlayerInput].
      * @param onShieldArmProgress Callback invoked each sample with the local shield
      *   arming progress in `[0, 1]` (for the loading indicator). Defaults to a no-op.
+     * @param touchShieldHeld Reads whether the on-screen shield/bubble button is
+     *   currently pressed. OR-ed with the gesture shield each cadence tick.
+     * @param touchFireEvents Emits once per on-screen fire (double-tap); each emission
+     *   produces an immediate ATTACK using the latest known aim.
      */
+    @Suppress("LongParameterList")
     fun start(
         scope: CoroutineScope,
         playerId: Int,
         mode: GameMode,
         onInput: (NetMessage.PlayerInput) -> Unit,
         onShieldArmProgress: (Float) -> Unit = {},
+        touchShieldHeld: () -> Boolean = { false },
+        touchFireEvents: Flow<Unit> = emptyFlow(),
     ) {
         stop()
         pipelineJob = scope.launch {
@@ -82,6 +102,8 @@ class InputPipeline @Inject constructor(
                 mode = mode,
                 onInput = onInput,
                 onShieldArmProgress = onShieldArmProgress,
+                touchShieldHeld = touchShieldHeld,
+                touchFireEvents = touchFireEvents,
             )
         }
     }
@@ -107,6 +129,9 @@ class InputPipeline @Inject constructor(
 
             /** A new accelerometer reading arrived. */
             data class Accel(val sample: AccelerometerSample) : SensorEvent
+
+            /** The on-screen fire control fired (double-tap). */
+            data object TouchFire : SensorEvent
         }
 
         /**
@@ -127,6 +152,10 @@ class InputPipeline @Inject constructor(
          * @param mode Game mode (controls classifier configuration).
          * @param onInput Invoked for each [NetMessage.PlayerInput] produced.
          * @param onShieldArmProgress Invoked each sample with the local shield arming progress `[0, 1]`.
+         * @param touchShieldHeld Reads whether the on-screen shield/bubble button is held;
+         *   OR-ed with the gesture shield each cadence tick.
+         * @param touchFireEvents Emits once per on-screen fire; each emission produces an
+         *   immediate ATTACK using the latest known aim.
          */
         @Suppress("LongParameterList")
         suspend fun processSamples(
@@ -137,6 +166,8 @@ class InputPipeline @Inject constructor(
             mode: GameMode,
             onInput: (NetMessage.PlayerInput) -> Unit,
             onShieldArmProgress: (Float) -> Unit = {},
+            touchShieldHeld: () -> Boolean = { false },
+            touchFireEvents: Flow<Unit> = emptyFlow(),
         ) {
             val fireSwingThreshold = when (mode) {
                 GameMode.STANDARD -> GestureThresholds.FIRE_SWING_MPS2
@@ -153,12 +184,32 @@ class InputPipeline @Inject constructor(
 
             val orientationEvents = orientationFlow.map { SensorEvent.Orientation(it) }
             val accelEvents = accelFlow.map { SensorEvent.Accel(it) }
+            val touchFire = touchFireEvents.map { SensorEvent.TouchFire }
 
-            merge(orientationEvents, accelEvents).collect { event ->
+            merge(orientationEvents, accelEvents, touchFire).collect { event ->
+                // A touch fire produces an immediate ATTACK using the latest known aim;
+                // it bypasses the gesture classifier entirely.
+                if (event is SensorEvent.TouchFire) {
+                    val orientation = latestOrientation ?: return@collect
+                    val now = clock.nowMillis()
+                    onInput(
+                        NetMessage.PlayerInput(
+                            playerId = playerId,
+                            aimDegrees = orientation.azimuthDegrees,
+                            pitchDegrees = orientation.pitchDegrees,
+                            action = PlayerAction.ATTACK,
+                            clientTimeMillis = now,
+                        ),
+                    )
+                    lastCadenceMillis = now
+                    return@collect
+                }
+
                 // Update the stored value for whichever sensor just fired.
                 when (event) {
                     is SensorEvent.Orientation -> latestOrientation = event.sample
                     is SensorEvent.Accel -> latestAccelMagnitude = event.sample.linearAccelMagnitude
+                    SensorEvent.TouchFire -> return@collect // handled above
                 }
 
                 // Wait until we have at least one orientation reading so azimuth/pitch are valid.
@@ -173,7 +224,8 @@ class InputPipeline @Inject constructor(
                 )
 
                 val gesture = classifier.onSample(motionSample)
-                val isShielding = classifier.isShieldActive
+                // Touch shield is OR-ed with the gesture shield so either input raises it.
+                val isShielding = classifier.isShieldActive || touchShieldHeld()
                 val rawAim = orientation.azimuthDegrees
                 onShieldArmProgress(classifier.shieldArmProgress(now))
 

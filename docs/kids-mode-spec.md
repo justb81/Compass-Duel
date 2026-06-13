@@ -37,7 +37,7 @@ child plays from the first to the last second.
 |---|---|
 | Attack (deal damage) | Toss a sparkle (collect a star on a catch) |
 | HP, damage, knockout | Stars; counters only increase, no elimination |
-| Shield (upright hold, 50%-of-round budget) | **Magic bubble** — blocks the sparkle *and earns the defender a star*; no budget |
+| Shield (upright hold, 50%-of-round budget) | **Magic bubble** — press and hold the on-screen bubble button; blocks the sparkle *and earns the defender a star*; no budget |
 | Element strengths/weaknesses | Sprites are purely cosmetic; no matchup math |
 | ±25° aim tolerance | **±40°** — generous for small hands |
 | Shake threshold 2.5 m/s² | **1.5 m/s²** — a soft wiggle is enough |

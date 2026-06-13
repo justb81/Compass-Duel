@@ -52,6 +52,16 @@ shield consumes the budget; once it is exhausted the shield can no longer be
 held for the rest of the round. The remaining budget and the <1 s arming
 progress are shown by a shield indicator in the center of the compass.
 
+#### Touch controls (accessibility)
+
+For players who find the sustained upright-hold and the fire swing tiring, the
+game screen always offers on-screen alternatives **alongside** the motion
+gestures (no toggle — use whichever fits at any moment): **double-tap the play
+area to Fire** and **press-and-hold the shield button to Shield**. Aiming stays
+motion-based. Touch and gesture inputs are folded into the same client→host
+`PlayerInput` stream (`InputPipeline`), so the Host treats them identically — the
+50%-of-round shield budget and authoritative hit detection are unchanged.
+
 ### Hit Detection
 
 A hit is only registered when:
@@ -210,6 +220,11 @@ Two gestures are detected from the fused orientation + accelerometer stream
   the player) **and** linear acceleration `≤ ~1.2 m/s²` (steady) sustained for
   `>1 s`. It stays active while upright until a fire swing or leaving the upright
   band. Subject to the per-round 50%-of-round time budget (host-enforced).
+
+`InputPipeline` also folds the **touch controls** into this same stream: a
+double-tap emits an `ATTACK` with the latest aim, and the held shield button is
+OR-ed with the gesture shield in the 100 ms cadence emission. The host is
+source-agnostic — it only sees the resulting `PlayerInput` actions.
 
 ```kotlin
 // Swing detection via acceleration delta

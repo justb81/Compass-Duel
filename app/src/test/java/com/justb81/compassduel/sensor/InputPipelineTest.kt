@@ -5,6 +5,7 @@ import com.justb81.compassduel.game.gesture.GestureThresholds
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import com.justb81.compassduel.net.protocol.PlayerAction
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.test.runTest
@@ -34,6 +35,10 @@ class InputPipelineTest {
 
     private fun upright(azimuth: Float = 0f) =
         OrientationSample(azimuthDegrees = azimuth, pitchDegrees = 0f, rollDegrees = 0f, accuracy = 3)
+
+    /** A clearly non-upright posture, so the gesture shield can never arm from it. */
+    private fun tilted(azimuth: Float = 0f) =
+        OrientationSample(azimuthDegrees = azimuth, pitchDegrees = TILTED_PITCH, rollDegrees = 0f, accuracy = 3)
 
     /**
      * A clock that advances [stepMillis] on every call, so successive merged samples carry
@@ -128,6 +133,75 @@ class InputPipelineTest {
 
         assertTrue(standardOutputs.none { it.action == PlayerAction.ATTACK }) { "Standard ignores the soft swing" }
         assertTrue(kidsOutputs.any { it.action == PlayerAction.ATTACK }) { "Kids fires on the soft swing" }
+    }
+
+    // ---------------------------------------------------------------------------
+    // Touch mode — on-screen controls coexisting with the gestures
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `held touch shield emits SHIELD even when the device is not upright`() = runTest {
+        val outputs = mutableListOf<NetMessage.PlayerInput>()
+        testClock.time = START_TIME + InputPipeline.CADENCE_MILLIS
+
+        // Tilted posture means the gesture shield can never arm — only the touch
+        // button can be the source of the SHIELD action here.
+        InputPipeline.processSamples(
+            orientationFlow = flow { emit(tilted()) },
+            accelFlow = emptyFlow(),
+            clock = testClock,
+            playerId = PLAYER_ID,
+            mode = GameMode.STANDARD,
+            onInput = { outputs += it },
+            touchShieldHeld = { true },
+        )
+
+        assertEquals(PlayerAction.SHIELD, outputs.last().action)
+    }
+
+    @Test
+    fun `held touch shield raises the bubble in kids mode`() = runTest {
+        val outputs = mutableListOf<NetMessage.PlayerInput>()
+        testClock.time = START_TIME + InputPipeline.CADENCE_MILLIS
+
+        // Kids disables the gesture shield entirely, so the touch button is the
+        // only way to reach the magic-bubble posture.
+        InputPipeline.processSamples(
+            orientationFlow = flow { emit(upright()) },
+            accelFlow = emptyFlow(),
+            clock = testClock,
+            playerId = PLAYER_ID,
+            mode = GameMode.KIDS,
+            onInput = { outputs += it },
+            touchShieldHeld = { true },
+        )
+
+        assertEquals(PlayerAction.SHIELD, outputs.last().action)
+    }
+
+    @Test
+    fun `a touch fire emits ATTACK with the latest aim`() = runTest {
+        val outputs = mutableListOf<NetMessage.PlayerInput>()
+        testClock.time = START_TIME + InputPipeline.CADENCE_MILLIS
+
+        // The orientation sample is processed first (immediate emit); the touch fire
+        // arrives after a virtual delay so the latest aim is already known.
+        InputPipeline.processSamples(
+            orientationFlow = flow { emit(upright(azimuth = EXPECTED_RAW_AIM)) },
+            accelFlow = emptyFlow(),
+            clock = testClock,
+            playerId = PLAYER_ID,
+            mode = GameMode.STANDARD,
+            onInput = { outputs += it },
+            touchFireEvents = flow {
+                delay(1)
+                emit(Unit)
+            },
+        )
+
+        val attacks = outputs.filter { it.action == PlayerAction.ATTACK }
+        assertTrue(attacks.isNotEmpty()) { "Expected an ATTACK from the touch fire" }
+        assertEquals(EXPECTED_RAW_AIM, attacks.last().aimDegrees, AIM_DELTA)
     }
 
     // ---------------------------------------------------------------------------
@@ -249,5 +323,8 @@ class InputPipelineTest {
 
         /** Number of orientation updates to emit after a single swing spike in the duplicate test. */
         private const val REPEAT_ORIENTATION_UPDATES = 5
+
+        /** Pitch (degrees) well past the upright band, so the gesture shield cannot arm. */
+        private const val TILTED_PITCH = 90f
     }
 }
