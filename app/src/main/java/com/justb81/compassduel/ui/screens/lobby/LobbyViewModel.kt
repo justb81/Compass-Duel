@@ -8,16 +8,19 @@ import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.gesture.BowDetector
 import com.justb81.compassduel.game.gesture.BowSample
+import com.justb81.compassduel.haptics.HapticFeedback
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
+import com.justb81.compassduel.sensor.OrientationSample
 import com.justb81.compassduel.sensor.OrientationSensor
 import com.justb81.compassduel.session.GameSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -31,6 +34,18 @@ data class GreetingTarget(
     val iGreetedThem: Boolean,
     /** True when this opponent has bowed back at the local player. */
     val theyGreetedMe: Boolean,
+)
+
+/**
+ * Live feedback for the bow currently in progress, used to drive the on-screen
+ * tilt indicator and guidance while a target is armed.
+ *
+ * @param pitchDegrees The latest forward-tilt pitch (positive = top of phone away).
+ * @param phase The bow detector's current recognition phase.
+ */
+data class BowFeedback(
+    val pitchDegrees: Float,
+    val phase: BowDetector.Phase,
 )
 
 /** UI state for the lobby screen. */
@@ -70,17 +85,27 @@ data class LobbyUiState(
  * @param session The singleton game session facade.
  * @param orientationSensor Source of raw compass azimuth/pitch for bow detection.
  * @param clock Provides timestamps for the bow detector.
+ * @param haptics Confirms bow progress (deep threshold) and capture with vibration.
  */
 @HiltViewModel
 class LobbyViewModel @Inject constructor(
     private val session: GameSession,
     private val orientationSensor: OrientationSensor,
     private val clock: GameClock,
+    private val haptics: HapticFeedback,
 ) : ViewModel() {
 
     private val _startError = MutableStateFlow<String?>(null)
     private val _transportErrorRes = MutableStateFlow<Int?>(null)
     private val _armedTargetId = MutableStateFlow<Int?>(null)
+    private val _bowFeedback = MutableStateFlow<BowFeedback?>(null)
+
+    /**
+     * Live feedback for the in-progress bow (null when no target is armed). Exposed
+     * separately from [uiState] so the high-frequency sensor stream only recomposes
+     * the greeting rows, not the whole lobby.
+     */
+    val bowFeedback: StateFlow<BowFeedback?> = _bowFeedback.asStateFlow()
 
     private val bowDetector = BowDetector()
 
@@ -96,18 +121,34 @@ class LobbyViewModel @Inject constructor(
         viewModelScope.launch {
             orientationSensor.samples().collect { sample ->
                 val target = _armedTargetId.value ?: return@collect
-                val captured = bowDetector.onSample(
-                    BowSample(
-                        timestampMillis = clock.nowMillis(),
-                        pitchDegrees = sample.pitchDegrees,
-                        azimuthDegrees = sample.azimuthDegrees,
-                    ),
-                )
-                if (captured != null) {
-                    session.submitBow(target, captured)
-                    cancelBow()
-                }
+                onBowSample(target, sample)
             }
+        }
+    }
+
+    /**
+     * Feeds one orientation sample into the bow detector while [targetId] is armed,
+     * publishing live [bowFeedback] and firing haptics on the deep-threshold
+     * transition and on a completed bow.
+     */
+    private fun onBowSample(targetId: Int, sample: OrientationSample) {
+        val wasAscending = bowDetector.phase == BowDetector.Phase.ASCENDING
+        val captured = bowDetector.onSample(
+            BowSample(
+                timestampMillis = clock.nowMillis(),
+                pitchDegrees = sample.pitchDegrees,
+                azimuthDegrees = sample.azimuthDegrees,
+            ),
+        )
+        if (!wasAscending && bowDetector.phase == BowDetector.Phase.ASCENDING) {
+            haptics.greetingDeep()
+        }
+        if (captured != null) {
+            haptics.greetingBowed()
+            session.submitBow(targetId, captured)
+            cancelBow()
+        } else {
+            _bowFeedback.value = BowFeedback(sample.pitchDegrees, bowDetector.phase)
         }
     }
 
@@ -160,12 +201,14 @@ class LobbyViewModel @Inject constructor(
     /** Arms the bow detector to capture a bow at [targetId]. */
     fun armBow(targetId: Int) {
         bowDetector.reset()
+        _bowFeedback.value = null
         _armedTargetId.value = targetId
     }
 
     /** Cancels an in-progress bow capture. */
     fun cancelBow() {
         _armedTargetId.value = null
+        _bowFeedback.value = null
         bowDetector.reset()
     }
 
