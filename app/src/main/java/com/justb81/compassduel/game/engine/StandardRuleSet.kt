@@ -17,8 +17,8 @@ import com.justb81.compassduel.net.protocol.PlayerAction
  * Delegates all per-attack evaluation to the pure functions in
  * `game/standard/StandardMode.kt`. Adds engine-level concerns:
  * - Target selection: on-cone alive opponent with the smallest angular distance.
- * - Attack and dodge cooldown enforcement.
- * - Shield posture application.
+ * - Attack cooldown enforcement.
+ * - Shield posture application and per-round shield-time budget consumption.
  * - Round-over detection: last survivor or timer expired.
  * - Timeout outcome: highest HP wins; exact tie → draw (null winner id).
  */
@@ -26,7 +26,6 @@ class StandardRuleSet : ModeRuleSet {
 
     override val aimToleranceDegrees: Float = Bearing.DEFAULT_TOLERANCE_DEGREES
     override val roundDurationSeconds: Int = StandardRules.ROUND_DURATION_SECONDS
-    override val dodgeEnabled: Boolean = true
 
     override fun initialState(setup: List<EnginePlayerSetup>): EngineState.Standard =
         EngineState.Standard(
@@ -44,54 +43,35 @@ class StandardRuleSet : ModeRuleSet {
         require(state is EngineState.Standard) { "StandardRuleSet requires EngineState.Standard" }
 
         val events = mutableListOf<GameEvent>()
-        var players = applyShieldPosture(state.players, inputs.continuousInputs)
-        players = applyDodges(players, inputs.queuedActions, nowMillis)
+        val deltaMillis = if (state.lastTickMillis == 0L) 0L else (nowMillis - state.lastTickMillis).coerceAtLeast(0L)
+        var players = applyShieldPosture(state.players, inputs.continuousInputs, deltaMillis)
         players = applyAttacks(players, inputs.queuedActions, nowMillis, setup, events)
 
         val targetIds = buildTargetIds(players, inputs.continuousInputs, setup)
         return TickResult(
-            state = EngineState.Standard(players),
+            state = EngineState.Standard(players, lastTickMillis = nowMillis),
             events = events,
             targetIds = targetIds,
         )
     }
 
-    /** Applies the latest continuous shield posture to every player. */
+    /**
+     * Applies the latest continuous shield posture to every player and consumes the
+     * per-round shield-time budget. A player who wants to shield only stays shielding
+     * while budget remains; once [DuelPlayer.shieldRemainingMillis] hits 0 the shield
+     * is force-dropped for the rest of the round.
+     */
     private fun applyShieldPosture(
         players: List<DuelPlayer>,
         continuousInputs: Map<Int, ContinuousInput>,
+        deltaMillis: Long,
     ): List<DuelPlayer> = players.map { player ->
-        val input = continuousInputs[player.id]
-        if (input != null) player.copy(isShielding = input.isShielding && !player.isEliminated) else player
-    }
-
-    /** Activates a dodge window for every queued DODGE action that is off cooldown. */
-    private fun applyDodges(
-        players: List<DuelPlayer>,
-        actions: List<QueuedAction>,
-        nowMillis: Long,
-    ): List<DuelPlayer> {
-        var result = players
-        actions.filter { it.action == PlayerAction.DODGE }.forEach { action ->
-            result = applyOneDodge(result, action, nowMillis)
-        }
-        return result
-    }
-
-    private fun applyOneDodge(
-        players: List<DuelPlayer>,
-        action: QueuedAction,
-        nowMillis: Long,
-    ): List<DuelPlayer> {
-        val actorIndex = players.indexOfFirst { it.id == action.playerId }
-        val actor = players.getOrNull(actorIndex)
-        if (actor == null || actor.isEliminated || nowMillis < actor.dodgeReadyAtMillis) return players
-        return players.toMutableList().also {
-            it[actorIndex] = actor.copy(
-                dodgeActiveUntilMillis = nowMillis + StandardRules.DODGE_ACTIVE_MILLIS,
-                dodgeReadyAtMillis =
-                    nowMillis + StandardRules.DODGE_ACTIVE_MILLIS + StandardRules.DODGE_COOLDOWN_MILLIS,
-            )
+        val wantsShield = continuousInputs[player.id]?.isShielding == true && !player.isEliminated
+        if (!wantsShield) {
+            player.copy(isShielding = false)
+        } else {
+            val remaining = (player.shieldRemainingMillis - deltaMillis).coerceAtLeast(0L)
+            player.copy(isShielding = remaining > 0L, shieldRemainingMillis = remaining)
         }
     }
 
@@ -130,7 +110,6 @@ class StandardRuleSet : ModeRuleSet {
             bearingToTarget = bearing,
             attackerElement = actor.element,
             target = target,
-            nowMillis = nowMillis,
         )
 
         val updated = players.toMutableList()
@@ -149,8 +128,6 @@ class StandardRuleSet : ModeRuleSet {
         when (result) {
             is AttackResult.Hit ->
                 applyDamageEvent(GameEventType.HIT, attackerId, targetId, result.damage, players, events)
-            is AttackResult.Dodged ->
-                applyDamageEvent(GameEventType.DODGED, attackerId, targetId, result.damage, players, events)
             is AttackResult.Blocked -> events += GameEvent(GameEventType.BLOCKED, attackerId, targetId)
             is AttackResult.Missed -> events += GameEvent(GameEventType.MISS, attackerId, targetId)
         }

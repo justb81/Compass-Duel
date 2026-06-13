@@ -18,14 +18,12 @@ object StandardRules {
     /** A round ends automatically after this many seconds if players remain. */
     const val ROUND_DURATION_SECONDS = 90
 
-    /** Fraction of damage that gets through when the target is dodging. */
-    const val DODGE_DAMAGE_FACTOR = 0.5f
-
-    /** How long (ms) a dodge absorbs damage after the gesture fires. */
-    const val DODGE_ACTIVE_MILLIS = 500L
-
-    /** Minimum time (ms) between the end of one dodge and the start of the next. */
-    const val DODGE_COOLDOWN_MILLIS = 2_000L
+    /**
+     * Total shield-time budget per player per round (ms): 50 % of the round.
+     * Shielding consumes this budget; once exhausted the shield can no longer
+     * be held for the rest of the round.
+     */
+    const val SHIELD_BUDGET_MILLIS = ROUND_DURATION_SECONDS * 1_000L / 2
 
     /** Minimum time (ms) between two consecutive attacks by the same player. */
     const val ATTACK_COOLDOWN_MILLIS = 700L
@@ -43,9 +41,9 @@ object StandardRules {
  * @param id Unique player identifier (1 = host; 2–4 = clients in join order).
  * @param element The element chosen in the lobby; null before character selection.
  * @param hp Current hit points. Clamped to [0, [StandardRules.MAX_HP]].
- * @param isShielding True while the player holds the device flat (shield posture).
- * @param dodgeActiveUntilMillis Epoch millis until which an active dodge absorbs damage (0 = not dodging).
- * @param dodgeReadyAtMillis Epoch millis after which the next dodge may fire (0 = ready immediately).
+ * @param isShielding True while the player holds the upright shield posture.
+ * @param shieldRemainingMillis Remaining shield-time budget for the round (ms);
+ *   starts at [StandardRules.SHIELD_BUDGET_MILLIS] and is consumed while shielding.
  * @param attackReadyAtMillis Epoch millis after which the next attack may fire (0 = ready immediately).
  */
 data class DuelPlayer(
@@ -53,21 +51,17 @@ data class DuelPlayer(
     val element: Element?,
     val hp: Int = StandardRules.MAX_HP,
     val isShielding: Boolean = false,
-    val dodgeActiveUntilMillis: Long = 0L,
-    val dodgeReadyAtMillis: Long = 0L,
+    val shieldRemainingMillis: Long = StandardRules.SHIELD_BUDGET_MILLIS,
     val attackReadyAtMillis: Long = 0L,
 ) {
     /** True when the player has been eliminated (HP reached zero). */
     val isEliminated: Boolean get() = hp <= 0
 }
 
-/** True while the dodge window is open (damage is halved). */
-fun DuelPlayer.isDodging(nowMillis: Long): Boolean = nowMillis < dodgeActiveUntilMillis
-
 /**
  * Outcome of a single attack evaluation on the host.
  *
- * The host decides whether an attack lands, is blocked, or is dodged;
+ * The host decides whether an attack lands or is blocked;
  * clients only receive the authoritative result.
  */
 sealed interface AttackResult {
@@ -79,12 +73,6 @@ sealed interface AttackResult {
     data object Blocked : AttackResult
 
     /**
-     * The target was dodging — damage is halved and rounded to the nearest integer.
-     * @param damage Final damage after the dodge penalty and element modifier.
-     */
-    data class Dodged(val damage: Int) : AttackResult
-
-    /**
      * The attack landed cleanly.
      * @param damage Final damage after the element modifier.
      */
@@ -94,31 +82,24 @@ sealed interface AttackResult {
 /**
  * Evaluates one attack from the host's authoritative game state.
  *
- * Priority order: off-cone → eliminated target → shielding → dodging → hit.
+ * Priority order: off-cone → eliminated target → shielding → hit.
  *
  * @param aimAzimuth The attacker's reported aim direction in degrees [0, 360).
  * @param bearingToTarget The host-calculated bearing from the attacker's seat to the target's seat.
  * @param attackerElement The attacker's chosen element; null falls back to neutral damage.
  * @param target The target's current state.
- * @param nowMillis Current epoch millis used to check the dodge window.
  */
 fun evaluateAttack(
     aimAzimuth: Float,
     bearingToTarget: Float,
     attackerElement: Element?,
     target: DuelPlayer,
-    nowMillis: Long,
 ): AttackResult {
     if (!Bearing.isOnTarget(aimAzimuth, bearingToTarget)) return AttackResult.Missed
     if (target.isEliminated) return AttackResult.Missed
     if (target.isShielding) return AttackResult.Blocked
 
-    val rawDamage = computeDamage(attackerElement, target.element)
-    return if (target.isDodging(nowMillis)) {
-        AttackResult.Dodged((rawDamage * StandardRules.DODGE_DAMAGE_FACTOR).roundToInt())
-    } else {
-        AttackResult.Hit(rawDamage)
-    }
+    return AttackResult.Hit(computeDamage(attackerElement, target.element))
 }
 
 /**

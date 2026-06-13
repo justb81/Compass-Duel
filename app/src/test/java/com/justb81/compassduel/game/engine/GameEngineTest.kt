@@ -155,11 +155,11 @@ class GameEngineTest {
     }
 
     // ---------------------------------------------------------------------------
-    // Dodge cooldown enforced
+    // Shield budget reported in the snapshot
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `dodge cooldown is applied after the first dodge`() = runTest {
+    fun `standard snapshot reports the remaining shield budget`() = runTest {
         val clock = FakeClock()
         val engine = standardEngine(clock, this)
         engine.startRound(standardSetup, roundIndex = 0)
@@ -167,18 +167,17 @@ class GameEngineTest {
         clock.advance(COUNTDOWN_MILLIS + 1L)
         engine.tick()
 
-        // First dodge
-        engine.submitInput(2, 0f, false, PlayerAction.DODGE)
+        // Hold the shield for one second of ticks.
+        engine.submitInput(2, 0f, true, PlayerAction.IDLE)
         engine.tick()
-        // Player should have an active dodge right now — hp stays intact even if attacked
-        // The dodgeReadyAtMillis is internal; we verify through the game state
-
-        // Immediate second dodge — should be blocked by cooldown
-        clock.advance(100L)
-        engine.submitInput(2, 0f, false, PlayerAction.DODGE)
+        clock.advance(MILLIS_PER_SECOND)
+        engine.submitInput(2, 0f, true, PlayerAction.IDLE)
         engine.tick()
-        // Engine should not crash; dodge cooldown is the rule set's concern
 
+        val p2 = engine.snapshots.value.players.first { it.id == 2 }
+        assertTrue(p2.shieldRemainingMillis < StandardRules.SHIELD_BUDGET_MILLIS) {
+            "Shielding should have consumed some of the budget"
+        }
         engine.stop()
     }
 

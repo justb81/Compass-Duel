@@ -21,13 +21,12 @@ import com.justb81.compassduel.net.protocol.PlayerAction
  * - `KidsRoundStats` accumulation (stars, bubble blocks, sparkles thrown).
  * - REST_OVER event emission when rest windows expire.
  * - Round ends only on timer (no elimination in Kids Mode).
- * - Dodge is disabled; the wider 40° aim cone applies.
+ * - The wider 40° aim cone applies.
  */
 class KidsRuleSet : ModeRuleSet {
 
     override val aimToleranceDegrees: Float = KidsRules.AIM_TOLERANCE_DEGREES
     override val roundDurationSeconds: Int = KidsRules.ROUND_DURATION_SECONDS
-    override val dodgeEnabled: Boolean = false
 
     override fun initialState(setup: List<EnginePlayerSetup>): EngineState.Kids =
         EngineState.Kids(

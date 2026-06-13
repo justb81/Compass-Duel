@@ -89,9 +89,8 @@
     <string name="game_help_close">Hilfe schließen</string>
     <string name="game_help_title_standard">So wird gespielt</string>
     <string name="game_help_aim_standard">Zielen: Richte dein Handy auf einen Gegner im Kompassring.</string>
-    <string name="game_help_attack_standard">Angreifen: Kippe das Handy nach vorne und schüttle es.</string>
-    <string name="game_help_shield_standard">Schild: Halte das Handy flach, um Angriffe zu blocken.</string>
-    <string name="game_help_dodge_standard">Ausweichen: Kippe das Handy schnell in die andere Richtung.</string>
+    <string name="game_help_attack_standard">Feuern: Ziele auf einen Gegner und schwinge das Handy kurz.</string>
+    <string name="game_help_shield_standard">Schild: Halte das Handy eine Sekunde aufrecht und ruhig. Du kannst die Hälfte der Runde schützen.</string>
     <string name="game_help_title_kids">So wird gespielt</string>
     <string name="game_help_aim_kids">Zielen: Richte dein Handy auf eine Freundin oder einen Freund im Ring — der Bereich ist schön groß.</string>
     <string name="game_help_toss_kids">Funkeln werfen: Kippe dein Handy nach vorne und wackle ein bisschen.</string>

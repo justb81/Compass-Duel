@@ -68,8 +68,13 @@ sealed interface EngineState {
      * Standard Mode in-round state.
      *
      * @param players Current state of every player in the round.
+     * @param lastTickMillis Epoch millis of the previous tick, used to measure the
+     *   shield-budget delta consumed this tick (0 before the first tick).
      */
-    data class Standard(val players: List<DuelPlayer>) : EngineState
+    data class Standard(
+        val players: List<DuelPlayer>,
+        val lastTickMillis: Long = 0L,
+    ) : EngineState
 
     /**
      * Kids Mode in-round state.
@@ -88,7 +93,7 @@ sealed interface EngineState {
 // ---------------------------------------------------------------------------
 
 /**
- * Discrete action submitted by a player during a tick (e.g. ATTACK or DODGE).
+ * Discrete action submitted by a player during a tick (e.g. ATTACK).
  *
  * @param playerId The acting player.
  * @param action The action type.
@@ -185,9 +190,6 @@ interface ModeRuleSet {
 
     /** Active-phase duration in seconds. */
     val roundDurationSeconds: Int
-
-    /** Whether DODGE gestures are processed for this mode. */
-    val dodgeEnabled: Boolean
 
     /**
      * Builds the initial [EngineState] from the per-player setup data.
@@ -344,7 +346,7 @@ open class GameEngine(
      * Submits a player input to the engine. Thread-safe.
      *
      * For continuous state (aim, shield posture) this replaces the previous value.
-     * For discrete actions (ATTACK, DODGE) the action is queued and consumed exactly once.
+     * For discrete actions (ATTACK) the action is queued and consumed exactly once.
      *
      * @param playerId The submitting player's id.
      * @param aimDegrees Calibrated aim azimuth.
@@ -467,6 +469,7 @@ open class GameEngine(
                     hp = p.hp,
                     status = standardStatus(p),
                     targetId = targetIds[p.id],
+                    shieldRemainingMillis = p.shieldRemainingMillis,
                 )
             }
             is EngineState.Kids -> state.players.map { p ->

@@ -60,8 +60,8 @@ enum class ActionEffectKind {
 }
 
 /**
- * Full-screen overlay that renders the active [effect] (one-shot) plus persistent
- * defensive visuals (shield aura while [shielding], dodge sweep while [dodging]).
+ * Full-screen overlay that renders the active [effect] (one-shot) plus the
+ * persistent shield aura while [shielding].
  *
  * Drawing is pure Canvas with a small set of [Animatable]s; no per-frame
  * allocations. Effects branch on [mode]: Kids Mode uses friendly sparkles,
@@ -70,7 +70,6 @@ enum class ActionEffectKind {
  * @param effect The transient effect to play, or null when none is active.
  * @param mode The active game mode; drives friendly vs. combat visuals.
  * @param shielding True while the local player holds a shield/bubble.
- * @param dodging True during the local player's dodge window (Standard only).
  * @param modifier Modifier for the overlay Canvas (should fill the ring area).
  */
 @Composable
@@ -78,7 +77,6 @@ fun ActionEffectOverlay(
     effect: ActionEffect?,
     mode: GameMode,
     shielding: Boolean,
-    dodging: Boolean,
     modifier: Modifier = Modifier,
 ) {
     // One-shot progress 0f..1f, restarted whenever the trigger id changes.
@@ -102,9 +100,6 @@ fun ActionEffectOverlay(
 
         if (shielding) {
             drawShieldAura(centre, radius, palette, auraPhase)
-        }
-        if (dodging) {
-            drawDodgeSweep(centre, radius, palette, auraPhase)
         }
 
         val active = effect ?: return@Canvas
@@ -280,24 +275,6 @@ private fun DrawScope.drawShieldAura(
     )
 }
 
-/** A rotating sweep arc drawn during the dodge window. */
-private fun DrawScope.drawDodgeSweep(
-    centre: Offset,
-    radius: Float,
-    palette: EffectPalette,
-    phase: Float,
-) {
-    val sweepRadius = radius * DODGE_RADIUS_FACTOR
-    val dots = DODGE_DOTS
-    for (i in 0 until dots) {
-        val ang = (i.toFloat() / dots + phase) * TWO_PI
-        val dir = Offset(sin(ang.toDouble()).toFloat(), -cos(ang.toDouble()).toFloat())
-        val pos = centre + dir * sweepRadius
-        val a = DODGE_ALPHA * (1f - i.toFloat() / dots)
-        drawCircle(palette.accent.copy(alpha = a), radius = DODGE_DOT_DP.dp.toPx(), center = pos)
-    }
-}
-
 /** A small four-point sparkle cross. */
 private fun DrawScope.drawSparkle(at: Offset, size: Float, color: Color) {
     drawLine(color, start = Offset(at.x - size, at.y), end = Offset(at.x + size, at.y), strokeWidth = SPARKLE_STROKE_DP.dp.toPx())
@@ -353,12 +330,6 @@ private const val SHIELD_OFFSET_DP = 14f
 private const val SHIELD_STROKE_DP = 4f
 private const val SHIELD_INNER_GAP_DP = 6f
 private const val SHIELD_INNER_SCALE = 0.6f
-
-// Dodge sweep
-private const val DODGE_RADIUS_FACTOR = 0.55f
-private const val DODGE_DOTS = 6
-private const val DODGE_DOT_DP = 5f
-private const val DODGE_ALPHA = 0.7f
 
 // Sparkle helper
 private const val SPARKLE_STROKE_DP = 2f

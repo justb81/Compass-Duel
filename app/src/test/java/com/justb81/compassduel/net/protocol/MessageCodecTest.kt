@@ -116,7 +116,7 @@ class MessageCodecTest {
             phase = RoundPhase.PLAYING,
             remainingMillis = 60_000L,
             players = listOf(
-                PlayerSnapshot(id = 1, hp = 85, status = PlayerStatus.SHIELDING),
+                PlayerSnapshot(id = 1, hp = 85, status = PlayerStatus.SHIELDING, shieldRemainingMillis = 22_500L),
                 PlayerSnapshot(id = 2, hp = 60, status = PlayerStatus.ATTACKING, targetId = 3),
                 PlayerSnapshot(id = 3, hp = 100, status = PlayerStatus.IDLE),
             ),
@@ -199,12 +199,12 @@ class MessageCodecTest {
             players = listOf(
                 PlayerSnapshot(id = 1, hp = 100, status = PlayerStatus.IDLE),
                 PlayerSnapshot(id = 2, hp = 75, status = PlayerStatus.ATTACKING, targetId = 3),
-                PlayerSnapshot(id = 3, hp = 50, status = PlayerStatus.DODGING),
-                PlayerSnapshot(id = 4, hp = 25, status = PlayerStatus.SHIELDING),
+                PlayerSnapshot(id = 3, hp = 50, status = PlayerStatus.IDLE),
+                PlayerSnapshot(id = 4, hp = 25, status = PlayerStatus.SHIELDING, shieldRemainingMillis = 30_000L),
             ),
             events = listOf(
                 GameEvent(type = GameEventType.HIT, actorId = 2, targetId = 3, amount = 20),
-                GameEvent(type = GameEventType.DODGED, actorId = 3, targetId = 1, amount = 10),
+                GameEvent(type = GameEventType.BLOCKED, actorId = 1, targetId = 4),
             ),
         )
         val encoded = MessageCodec.encode(NetMessage.StateBroadcast(snapshot))

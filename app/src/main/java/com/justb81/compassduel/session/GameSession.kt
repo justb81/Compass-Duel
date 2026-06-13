@@ -687,7 +687,7 @@ class GameSession @Inject constructor(
     private fun feedInputToEngine(input: NetMessage.PlayerInput, trustedPlayerId: Int) {
         val isShielding = input.action == PlayerAction.SHIELD
         val action = when (input.action) {
-            PlayerAction.ATTACK, PlayerAction.DODGE -> input.action
+            PlayerAction.ATTACK -> input.action
             else -> null
         }
         engine?.submitInput(

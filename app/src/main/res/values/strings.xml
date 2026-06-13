@@ -89,9 +89,8 @@
     <string name="game_help_close">Close help</string>
     <string name="game_help_title_standard">How to play</string>
     <string name="game_help_aim_standard">Aim: point your phone at an opponent on the compass ring.</string>
-    <string name="game_help_attack_standard">Attack: tilt the phone forward and shake.</string>
-    <string name="game_help_shield_standard">Shield: hold the phone flat to block incoming attacks.</string>
-    <string name="game_help_dodge_standard">Dodge: quickly tilt the phone the opposite way.</string>
+    <string name="game_help_attack_standard">Fire: aim at an opponent and give your phone a quick swing.</string>
+    <string name="game_help_shield_standard">Shield: hold the phone upright and steady for a second. You can shield for half the round.</string>
     <string name="game_help_title_kids">How to play</string>
     <string name="game_help_aim_kids">Aim: point your phone at a friend on the ring — the cone is nice and wide.</string>
     <string name="game_help_toss_kids">Toss a sparkle: tilt your phone forward and give it a little wiggle.</string>

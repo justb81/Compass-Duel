@@ -23,12 +23,11 @@ import javax.inject.Inject
  *
  * ### Emission cadence
  * - **Every [CADENCE_MILLIS] ms**: emits the latest aim/pitch/shield state (action = IDLE or SHIELD).
- * - **Immediately on gesture**: emits ATTACK or DODGE (standard only) without waiting
- *   for the next cadence tick.
+ * - **Immediately on a FIRE swing**: emits ATTACK without waiting for the next cadence tick.
  *
  * ### Mode configuration
- * - **Standard**: [GestureThresholds.STANDARD_SHAKE_MPS2] shake threshold; dodge enabled.
- * - **Kids**: [KidsRules.SHAKE_THRESHOLD_MPS2] shake threshold; dodge disabled (DODGE never emitted).
+ * - **Standard**: [GestureThresholds.FIRE_SWING_MPS2] swing threshold; shield enabled.
+ * - **Kids**: [KidsRules.SHAKE_THRESHOLD_MPS2] swing threshold; shield disabled.
  *
  * ### Merge-stream design (Issue #70)
  * Orientation and accelerometer samples are merged into a single typed event stream via
@@ -64,6 +63,8 @@ class InputPipeline @Inject constructor(
      * @param mode The active game mode (controls gesture thresholds).
      * @param calibration Aim calibration captured at round start.
      * @param onInput Callback invoked for each produced [NetMessage.PlayerInput].
+     * @param onShieldArmProgress Callback invoked each sample with the local shield
+     *   arming progress in `[0, 1]` (for the loading indicator). Defaults to a no-op.
      */
     fun start(
         scope: CoroutineScope,
@@ -71,6 +72,7 @@ class InputPipeline @Inject constructor(
         mode: GameMode,
         calibration: AimCalibration,
         onInput: (NetMessage.PlayerInput) -> Unit,
+        onShieldArmProgress: (Float) -> Unit = {},
     ) {
         stop()
         pipelineJob = scope.launch {
@@ -82,6 +84,7 @@ class InputPipeline @Inject constructor(
                 mode = mode,
                 calibration = calibration,
                 onInput = onInput,
+                onShieldArmProgress = onShieldArmProgress,
             )
         }
     }
@@ -127,6 +130,7 @@ class InputPipeline @Inject constructor(
          * @param mode Game mode (controls classifier configuration).
          * @param calibration Aim offset for normalizing azimuth.
          * @param onInput Invoked for each [NetMessage.PlayerInput] produced.
+         * @param onShieldArmProgress Invoked each sample with the local shield arming progress `[0, 1]`.
          */
         @Suppress("LongParameterList")
         suspend fun processSamples(
@@ -137,13 +141,14 @@ class InputPipeline @Inject constructor(
             mode: GameMode,
             calibration: AimCalibration,
             onInput: (NetMessage.PlayerInput) -> Unit,
+            onShieldArmProgress: (Float) -> Unit = {},
         ) {
-            val shakeThreshold = when (mode) {
-                GameMode.STANDARD -> GestureThresholds.STANDARD_SHAKE_MPS2
+            val fireSwingThreshold = when (mode) {
+                GameMode.STANDARD -> GestureThresholds.FIRE_SWING_MPS2
                 GameMode.KIDS -> KidsRules.SHAKE_THRESHOLD_MPS2
             }
-            val dodgeEnabled = mode == GameMode.STANDARD
-            val classifier = GestureClassifier(shakeThreshold, dodgeEnabled)
+            val shieldEnabled = mode == GameMode.STANDARD
+            val classifier = GestureClassifier(fireSwingThreshold, shieldEnabled)
 
             var lastCadenceMillis = 0L
 
@@ -173,13 +178,13 @@ class InputPipeline @Inject constructor(
                 )
 
                 val gesture = classifier.onSample(motionSample)
-                val isShielding = classifier.isShieldPosture(orientation.pitchDegrees)
+                val isShielding = classifier.isShieldActive
                 val calibratedAim = calibration.calibrate(orientation.azimuthDegrees)
+                onShieldArmProgress(classifier.shieldArmProgress(now))
 
                 if (gesture != null) {
                     val action = when (gesture) {
-                        GestureEvent.ATTACK -> PlayerAction.ATTACK
-                        GestureEvent.DODGE -> PlayerAction.DODGE
+                        GestureEvent.FIRE -> PlayerAction.ATTACK
                     }
                     onInput(
                         NetMessage.PlayerInput(

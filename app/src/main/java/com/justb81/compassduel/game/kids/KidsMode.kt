@@ -36,7 +36,7 @@ object KidsRules {
     /**
      * Minimum time (ms) between two consecutive sparkle tosses by the same player,
      * enforced host-side. Mirrors [com.justb81.compassduel.game.standard.StandardRules.ATTACK_COOLDOWN_MILLIS]
-     * so the host remains authoritative even if the client-side SHAKE_DEBOUNCE_MILLIS is bypassed.
+     * so the host remains authoritative even if the client-side FIRE_DEBOUNCE_MILLIS is bypassed.
      */
     const val TOSS_COOLDOWN_MILLIS = 700L
 }
