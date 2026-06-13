@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.2](https://github.com/justb81/Compass-Duel/compare/v0.4.1...v0.4.2) (2026-06-13)
+
+
+### Bug Fixes
+
+* **build:** exclude unused native lib to clear Play debug-symbols warning ([#27](https://github.com/justb81/Compass-Duel/issues/27)) ([3a03338](https://github.com/justb81/Compass-Duel/commit/3a033381815da9619a6fe5dea690e4d03ea5d642))
+
 ## [0.4.1](https://github.com/justb81/Compass-Duel/compare/v0.4.0...v0.4.1) (2026-06-13)
 
 
