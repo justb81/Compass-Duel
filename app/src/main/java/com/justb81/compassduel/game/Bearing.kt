@@ -1,12 +1,14 @@
 package com.justb81.compassduel.game
 
 import kotlin.math.abs
-import kotlin.math.atan2
 
-/** A 2D seat position on the floor plan used to compute bearings between players. */
-data class Position(val x: Float, val y: Float)
-
-/** Geometry helpers for the host-side hit-detection logic described in the game spec. */
+/**
+ * Geometry helpers for the host-side hit-detection logic described in the game spec.
+ *
+ * Bearings between players are captured directly by the "bow to greet" handshake (each
+ * player's raw azimuth when pointing at an opponent) rather than computed from seat
+ * coordinates, so this object only needs angular-comparison helpers.
+ */
 object Bearing {
 
     /** Default aim tolerance: an attack lands only within ±25° of the true bearing. */
@@ -14,17 +16,6 @@ object Bearing {
 
     private const val FULL_CIRCLE = 360f
     private const val HALF_CIRCLE = 180f
-
-    /**
-     * Bearing in degrees (0° = +y / "north") from [from] toward [to], clockwise,
-     * normalised to the range `[0, 360)`.
-     */
-    fun calculate(from: Position, to: Position): Float {
-        val dx = (to.x - from.x).toDouble()
-        val dy = (to.y - from.y).toDouble()
-        val degrees = Math.toDegrees(atan2(dx, dy)).toFloat()
-        return (degrees + FULL_CIRCLE) % FULL_CIRCLE
-    }
 
     /** Smallest signed-magnitude angular difference between two bearings, in `[0, 180]`. */
     fun angularDistance(a: Float, b: Float): Float {

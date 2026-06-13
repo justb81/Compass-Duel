@@ -35,7 +35,7 @@ The chosen element also determines the attack gesture (see Game Mechanics).
 ### Core Principle
 
 1. At game start, one player becomes the **Host**. All others join via automatic BLE discovery.
-2. The Host assigns each player a **seat position** (entered once manually or determined via a short calibration round).
+2. Players perform a **"bow to greet" handshake**: each player aims at every opponent and bows (tilts the phone forward and back), capturing the absolute bearing toward them. The Host stores these bearings and uses them for hit detection. No manual seat entry and no aim calibration.
 3. Each player's screen displays a **compass ring** with colored markers for each opponent â€” corresponding to their real position in the space.
 4. A **targeting reticle** (based on current phone orientation) rotates live. When it points at an opponent within a tolerance angle â†’ opponent is locked on.
 
@@ -64,7 +64,7 @@ All inputs are evaluated centrally on the Host device â€” no client-side hi
 ### Round Structure
 
 ```
-Lobby â†’ Calibration (10s) â†’ Combat Phase (90s) â†’ Results â†’ Rematch?
+Lobby (greeting handshake) â†’ Get Ready (3s) â†’ Combat Phase (90s) â†’ Results â†’ Rematch?
 ```
 
 - **Combat Phase:** Each player starts with 100 HP. First to reach 0 is eliminated.
@@ -200,12 +200,12 @@ if (acceleration >= FIRE_SWING_THRESHOLD) {  // ~2.5 m/s²
 
 #### Magnetometer Interference in Vehicles
 
-Vehicle bodies and electric motors can interfere with the magnetometer [^9][^10]. The game counters this problem with two strategies:
+Vehicle bodies and electric motors can interfere with the magnetometer [^9][^10]. The "bow to greet" handshake handles this robustly:
 
-1. **Calibration round:** At game start, all players point their phones forward (toward the windshield) for 3 seconds. The Host calculates a shared base offset that is subtracted for all players.
-2. **Relative angles instead of absolute bearings:** The game only works with the *angular difference* between players, not absolute north references. Since all players experience the same electromagnetic interference, errors largely cancel out.
+1. **Per-device self-cancellation of static distortion:** hit detection compares each phone's live aim against a bearing *that same phone captured during its bow* — both in the same magnetic frame. Any static distortion the frame carries (hard-iron offset, soft-iron warping, the vehicle's constant bias) is present in both halves and cancels when the player points back at the target.
+2. **Common-mode rotation compensation:** when the whole vehicle turns, every phone's heading shifts together. The Host estimates this shared rotation as the median of all players' heading drift since round start (rejecting the few who are actively aiming) and subtracts it before hit detection. See [`CommonModeEstimator`](../app/src/main/java/com/justb81/compassduel/game/CommonModeEstimator.kt).
 
-If the magnetometer is completely unreliable (sensor accuracy = `SENSOR_STATUS_UNRELIABLE`), the app falls back to **manual position input**: players tap their approximate seat direction at the start (front-left, back-right, etc.).
+The only residual effect is a vehicle turning *between* greeting and the round, or a player physically relocating; both are handled by a cheap re-greet. If a player gets up and walks (detected via step / significant-motion sensors) they forfeit the current round and must re-greet before the next.
 
 ### Payload Format
 
@@ -239,7 +239,9 @@ If the magnetometer is completely unreliable (sensor accuracy = `SENSOR_STATUS_U
 
 ```kotlin
 fun evaluateAttack(attacker: Player, target: Player, azimuth: Float): HitResult {
-    val requiredBearing = calculateBearing(attacker.position, target.position)
+    // The bearing was captured during the greeting handshake (attacker bowing at target);
+    // no geometry is computed from positions.
+    val requiredBearing = bearings[attacker.id][target.id]
     val angleDiff = abs(normalizeAngle(azimuth - requiredBearing))
 
     if (angleDiff > TOLERANCE_DEGREES) return HitResult.MISS  // outside Â±25Â°
@@ -252,30 +254,31 @@ fun evaluateAttack(attacker: Player, target: Player, azimuth: Float): HitResult 
 
     return HitResult.HIT(finalDamage)
 }
-
-fun calculateBearing(from: Position, to: Position): Float {
-    // Calculates the angle from `from` to `to` in 2D floor plan
-    val dx = to.x - from.x
-    val dy = to.y - from.y
-    return (Math.toDegrees(atan2(dx.toDouble(), dy.toDouble())).toFloat() + 360f) % 360f
-}
 ```
 
 ***
 
-## Player Positions: Calibration Modes
+## Player Positions: the "Bow to Greet" handshake
 
-### Mode A: Manual Input (recommended for cars/trains)
+v1 establishes relative bearings with a diegetic greeting handshake (a refinement of the
+old "calibration round" idea). To join the table, a player aims at each opponent and bows
+— tilts the phone forward and back — and the opponent bows back to accept. Each bow
+captures the absolute azimuth from the bowing phone toward the opponent at bow onset
+(while still aimed; the bottom of the tilt faces the floor and is discarded). The Host
+assembles a bearing matrix `actorId → (targetId → degrees)` and a match starts only once
+every ordered pair has greeted. See
+[`BowDetector`](../app/src/main/java/com/justb81/compassduel/game/gesture/BowDetector.kt).
 
-At startup, a simple seating plan UI is displayed. Each player taps where they are sitting (relative 2D position on a 3Ã—3 grid). The Host calculates the angles between all players from this. Robust, reliable, no sensor dependency.
+Because each phone's captured bearing and its live aim share one magnetic frame, static
+vehicle distortion cancels per device, and shared (vehicle-turn) rotation is removed by the
+[`CommonModeEstimator`](../app/src/main/java/com/justb81/compassduel/game/CommonModeEstimator.kt).
 
-### Mode B: Calibration Round
+### Superseded alternatives
 
-All players briefly point in the same direction (e.g., direction of travel). The Host synchronizes compass offsets. Then each player briefly turns toward Player 1, from which the Host learns the relative angles. More involved, but no manual tapping required.
-
-### Mode C: BLE-RSSI Triangulation (experimental)
-
-Uses signal strength between devices as a distance estimate [^11]. Accuracy approximately Â±1â€“2 meters, sufficient as a rough positioning aid. Useful as a supplement to Mode A.
+- **Manual seat grid:** a 3×3 tap-to-seat UI. Removed — the bow handshake needs no manual
+  entry and is at least as robust to magnetometer distortion.
+- **BLE-RSSI triangulation (experimental):** signal strength as a distance estimate [^11];
+  ±1–2 m accuracy. Not used — too imprecise for an aiming game.
 
 ***
 
@@ -337,7 +340,7 @@ Uses signal strength between devices as a distance estimate [^11]. Accuracy appr
 - [ ] Nearby Connections setup: establish Host/Client connection [^5]
 - [ ] Basic compass screen with live-rotating ring
 - [ ] Define payload format + send/receive
-- [ ] Manual position input (Mode A)
+- [x] Bow-to-greet handshake for relative bearings
 
 #### Phase 2: Game Logic (Weekend 2, ~10h)
 - [ ] Tilt/shake gesture detection
@@ -349,7 +352,7 @@ Uses signal strength between devices as a distance estimate [^11]. Accuracy appr
 - [ ] Vibration feedback via `Vibrator`/`VibrationEffect`
 - [ ] Element system + damage multipliers
 - [ ] Lobby screen + matchmaking flow
-- [ ] Calibration round (Mode B)
+- [x] Common-mode rotation compensation + movement forfeit/re-greet
 
 #### Phase 4: Testing & Tuning (ongoing)
 - [ ] Extensive in-vehicle and train testing
@@ -362,7 +365,7 @@ Uses signal strength between devices as a distance estimate [^11]. Accuracy appr
 
 | Risk | Likelihood | Mitigation |
 |---|---|---|
-| Magnetometer interference in car | Medium | Mode A (manual input) as reliable fallback [^9][^10] |
+| Magnetometer interference in car | Medium | Static distortion self-cancels per device in the bow handshake; vehicle-turn rotation removed by common-mode estimation [^9][^10] |
 | Nearby Connections discovery too slow | Low | Connect once at start, keep session open throughout [^6] |
 | Inconsistent BLE in moving train | Low | BYTES payloads are small; Nearby auto-upgrades to WiFi Direct when available [^12] |
 | Different coordinate systems per phone orientation | Medium | Implement `remapCoordinateSystem()` for all device orientations [^8][^13] |
@@ -460,13 +463,16 @@ The spec §Special Rules describes a shield-interception rule where a shielding
 player absorbs attacks that cross through their position toward another player.
 This is not implemented in v1; only the direct attacker–target pair is evaluated.
 
-### Calibration — Mode A extended with client-local facing capture
+### Position & aim — the greeting handshake (no calibration)
 
-v1 uses Mode A (seat grid) for position, extended with a 3-second client-local
-facing capture at round start (the COUNTDOWN phase). During the countdown each
-device records its raw azimuth as `facingOffsetDegrees` in `AimCalibration`. From
-that point all aim values sent to the host are calibrated: `aim = azimuth − offset`.
-This compensates for room orientation without requiring a shared absolute reference.
+v1 establishes relative bearings via the bow-to-greet handshake in the lobby
+(`BowDetector` → `GameSession.bearingMatrix`), and reports **raw** absolute azimuth as
+aim during the round (`InputPipeline`). There is no seat grid and no facing-offset
+calibration: the host hit-check is `Bearing.isOnTarget(rawAzimuth, bearing[actor][target])`,
+where both quantities live in the same per-device magnetic frame so distortion cancels.
+The COUNTDOWN phase is now just a 3-second "get ready" window. Vehicle-turn drift is
+removed by `CommonModeEstimator`; a player who physically leaves their seat (detected by
+`MovementDetector` → `MovementPolicy`) forfeits the round and must re-greet.
 
 ### Standard-mode 90 s timeout outcome
 

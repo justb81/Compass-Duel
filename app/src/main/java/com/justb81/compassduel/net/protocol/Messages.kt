@@ -39,7 +39,8 @@ enum class PlayerAction {
 /**
  * Phase of the current round, broadcast in every [GameSnapshot].
  *
- * - [COUNTDOWN]: facing-capture window at round start (players point "forward").
+ * - [COUNTDOWN]: short "get ready" window at round start (bearings were already
+ *   captured in the lobby via the greeting handshake).
  * - [PLAYING]: active combat / star-catching phase.
  * - [ROUND_OVER]: round has ended; result is available.
  */
@@ -66,6 +67,9 @@ enum class PlayerStatus {
 
     /** Standard Mode: player HP reached zero. */
     ELIMINATED,
+
+    /** Player forfeited the current round after physically leaving their seat. */
+    FORFEITED,
 }
 
 /** The type of a discrete in-round event emitted by the host. */
@@ -91,6 +95,12 @@ enum class GameEventType {
 
     /** Kids: the post-catch rest window for a player has expired. */
     REST_OVER,
+
+    /** A player moved beyond the in-seat tolerance — non-blocking warning. */
+    MOVED_WARNING,
+
+    /** A player moved enough to forfeit the round; their bearings are invalidated. */
+    MOVED_FORFEIT,
 }
 
 /**
@@ -98,16 +108,17 @@ enum class GameEventType {
  *
  * @param id Player id (1 = host; 2–4 = clients in join order).
  * @param name Display name chosen in the home screen.
- * @param seatCell Index into the 3×3 seat grid (0–8), or null before selection.
+ * @param outgoingBearings Absolute bearings (`targetId → degrees [0, 360)`) this player
+ *   has captured by bowing at each opponent during the greeting handshake.
  * @param element Chosen element (Standard Mode), or null if not yet chosen / Kids Mode.
  * @param spriteId Chosen sprite index (Kids Mode), or null if not yet chosen / Standard Mode.
- * @param ready True when the player has chosen a seat and a character.
+ * @param ready True when the player has chosen a character and greeted everyone required.
  */
 @Serializable
 data class LobbyPlayer(
     val id: Int,
     val name: String,
-    val seatCell: Int? = null,
+    val outgoingBearings: Map<Int, Float> = emptyMap(),
     val element: Element? = null,
     val spriteId: Int? = null,
     val ready: Boolean = false,
@@ -127,6 +138,8 @@ data class LobbyPlayer(
  * @param shieldRemainingMillis Remaining shield-time budget in millis
  *   (Standard Mode only; 0 otherwise). The per-round budget is
  *   [com.justb81.compassduel.game.standard.StandardRules.SHIELD_BUDGET_MILLIS].
+ * @param movementWarning True when the player has moved past the in-seat tolerance but
+ *   not yet enough to forfeit (drives a "stay in your seat" warning).
  */
 @Serializable
 data class PlayerSnapshot(
@@ -137,6 +150,7 @@ data class PlayerSnapshot(
     val targetId: Int? = null,
     val restingUntilMillis: Long = 0L,
     val shieldRemainingMillis: Long = 0L,
+    val movementWarning: Boolean = false,
 )
 
 /**
@@ -201,13 +215,39 @@ sealed interface NetMessage {
     data class ClientHello(val playerName: String) : NetMessage
 
     /**
-     * Client has tapped a cell on the 3×3 seat grid.
+     * Client has bowed at another player during the greeting handshake, capturing the
+     * absolute bearing from this player toward [toPlayerId].
      *
-     * @param cell Seat cell index in [0, 8].
+     * @param fromPlayerId The bowing player's id (informational; the host authoritatively
+     *   maps the sending endpoint to a player id).
+     * @param toPlayerId The greeted player's id.
+     * @param bearingDegrees Raw absolute azimuth in `[0, 360)` captured at bow onset.
      */
     @Serializable
-    @SerialName("SeatChosen")
-    data class SeatChosen(val cell: Int) : NetMessage
+    @SerialName("Greeting")
+    data class Greeting(
+        val fromPlayerId: Int,
+        val toPlayerId: Int,
+        val bearingDegrees: Float,
+    ) : NetMessage
+
+    /**
+     * Client reports physical movement detected during the round (step detector /
+     * significant-motion trigger). Sparse — sent only when movement is detected, not on
+     * the 100 ms input cadence.
+     *
+     * @param playerId The moving player's id.
+     * @param stepDelta Steps detected since the previous report (0 for a significant-motion
+     *   trigger that carries no step count).
+     * @param significant True when the platform reported a significant-motion event.
+     */
+    @Serializable
+    @SerialName("PlayerMoved")
+    data class PlayerMoved(
+        val playerId: Int,
+        val stepDelta: Int = 0,
+        val significant: Boolean = false,
+    ) : NetMessage
 
     /**
      * Client has picked their character (element or sprite).
@@ -232,6 +272,8 @@ sealed interface NetMessage {
      * @param mode The game mode the host has selected.
      * @param players All players currently in the lobby.
      * @param yourPlayerId The recipient's own player id (assigned by the host).
+     * @param yourBearings The recipient's own captured bearings (`targetId → degrees`),
+     *   so the client can render opponent dots on its compass ring.
      */
     @Serializable
     @SerialName("LobbyState")
@@ -239,6 +281,7 @@ sealed interface NetMessage {
         val mode: GameMode,
         val players: List<LobbyPlayer>,
         val yourPlayerId: Int,
+        val yourBearings: Map<Int, Float> = emptyMap(),
     ) : NetMessage
 
     /**
@@ -247,9 +290,10 @@ sealed interface NetMessage {
      * @param mode The chosen game mode for this match.
      * @param roundIndex Zero-based round index (0 = first round).
      * @param roundDurationSeconds How long the active phase lasts.
-     * @param players Final player list with seat assignments.
-     * @param facingCaptureSeconds Seconds clients should capture their facing offset
-     *   at round start (COUNTDOWN phase length).
+     * @param players Final player list.
+     * @param bearings The full greeting bearing matrix (`actorId → (targetId → degrees)`).
+     *   Each client looks up its own row by its [LobbyState.yourPlayerId] to render
+     *   opponent dots.
      */
     @Serializable
     @SerialName("RoundStart")
@@ -258,7 +302,7 @@ sealed interface NetMessage {
         val roundIndex: Int,
         val roundDurationSeconds: Int,
         val players: List<LobbyPlayer>,
-        val facingCaptureSeconds: Int,
+        val bearings: Map<Int, Map<Int, Float>> = emptyMap(),
     ) : NetMessage
 
     // -------------------------------------------------------------------------
@@ -270,7 +314,7 @@ sealed interface NetMessage {
      * an ATTACK action).
      *
      * @param playerId The sender's player id.
-     * @param aimDegrees Calibrated aim azimuth in degrees [0, 360).
+     * @param aimDegrees Raw absolute aim azimuth (magnetic north) in degrees [0, 360).
      * @param pitchDegrees Current device pitch in degrees.
      * @param action The player's current discrete action.
      * @param clientTimeMillis Client-side epoch millis at capture time (diagnostics only —
@@ -328,4 +372,13 @@ sealed interface NetMessage {
     @Serializable
     @SerialName("Rematch")
     data object Rematch : NetMessage
+
+    /**
+     * Sent by the host mid-match when a player forfeited by leaving their seat: clients
+     * return to the lobby greeting view to re-bow before the next round. Match score is
+     * preserved (unlike [Rematch]).
+     */
+    @Serializable
+    @SerialName("Regreet")
+    data object Regreet : NetMessage
 }

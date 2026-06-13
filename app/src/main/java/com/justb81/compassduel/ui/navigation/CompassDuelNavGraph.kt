@@ -107,7 +107,12 @@ fun CompassDuelNavGraph(navController: NavHostController) {
                 }
                 SessionEvent.RematchRequested -> {
                     // Pop Game (and Results if present) back to Lobby so the
-                    // same players can adjust seats/picks before the next round.
+                    // same players can adjust picks/greetings before the next round.
+                    navController.popBackStack<GameRoute>(inclusive = true)
+                }
+                SessionEvent.RegreetRequired -> {
+                    // A player left their seat mid-match; everyone re-greets in the
+                    // lobby before the host resumes. Match score is preserved.
                     navController.popBackStack<GameRoute>(inclusive = true)
                 }
                 SessionEvent.PeerLost -> showPeerLostDialog = true

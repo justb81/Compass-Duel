@@ -1,6 +1,5 @@
 package com.justb81.compassduel.game.engine
 
-import com.justb81.compassduel.game.Position
 import com.justb81.compassduel.game.kids.KidsRules
 import com.justb81.compassduel.net.protocol.GameEventType
 import com.justb81.compassduel.net.protocol.PlayerAction
@@ -14,10 +13,10 @@ class KidsRuleSetTest {
     private val rules = KidsRuleSet()
     private val now = 1_000_000L
 
-    // Player 1 is north of player 2; from p1 to p2 is bearing 180°.
+    // Greeting bearings: p1 → p2 is 180°, p2 → p1 is 0°.
     private val setup = listOf(
-        EnginePlayerSetup(id = 1, name = "Star", position = Position(0f, 1f)),
-        EnginePlayerSetup(id = 2, name = "Comet", position = Position(0f, 0f)),
+        EnginePlayerSetup(id = 1, name = "Star", bearings = mapOf(2 to 180f)),
+        EnginePlayerSetup(id = 2, name = "Comet", bearings = mapOf(1 to 0f)),
     )
 
     private fun initialKidsState(): EngineState.Kids =

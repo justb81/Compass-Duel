@@ -120,10 +120,11 @@ class KidsRuleSet : ModeRuleSet {
         // Every toss counts toward sparkles thrown, regardless of outcome.
         val thrownStats = accumulateStat(stats, action.playerId) { it.copy(sparklesThrown = it.sparklesThrown + 1) }
         val actorSetup = setup.firstOrNull { it.id == action.playerId }
-        val target = actorSetup?.let { selectTarget(action.playerId, action.aimDegrees, playersWithCooldown, setup, it) }
-        if (actorSetup == null || target == null) return KidsTickState(playersWithCooldown, thrownStats)
-
-        val bearing = Bearing.calculate(actorSetup.position, setup.first { it.id == target.id }.position)
+        val target = actorSetup?.let { selectTarget(action.playerId, action.aimDegrees, playersWithCooldown, it) }
+        val bearing = target?.let { actorSetup?.bearings?.get(it.id) }
+        if (actorSetup == null || target == null || bearing == null) {
+            return KidsTickState(playersWithCooldown, thrownStats)
+        }
         val result = evaluateCatch(
             aimAzimuth = action.aimDegrees,
             bearingToTarget = bearing,
@@ -174,13 +175,11 @@ class KidsRuleSet : ModeRuleSet {
         actorId: Int,
         aimDegrees: Float,
         players: List<KidsPlayer>,
-        setup: List<EnginePlayerSetup>,
         actorSetup: EnginePlayerSetup,
     ): KidsPlayer? = players
         .filter { it.id != actorId }
         .mapNotNull { candidate ->
-            val candidateSetup = setup.firstOrNull { it.id == candidate.id } ?: return@mapNotNull null
-            val bearing = Bearing.calculate(actorSetup.position, candidateSetup.position)
+            val bearing = actorSetup.bearings[candidate.id] ?: return@mapNotNull null
             val distance = Bearing.angularDistance(aimDegrees, bearing)
             if (distance <= aimToleranceDegrees) candidate to distance else null
         }
@@ -223,7 +222,7 @@ class KidsRuleSet : ModeRuleSet {
         val input = continuousInputs[actor.id]
         val actorSetup = setup.firstOrNull { it.id == actor.id }
         val targetId = if (input != null && actorSetup != null) {
-            selectTarget(actor.id, input.aimDegrees, players, setup, actorSetup)?.id
+            selectTarget(actor.id, input.aimDegrees, players, actorSetup)?.id
         } else {
             null
         }

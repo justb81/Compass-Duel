@@ -1,7 +1,6 @@
 package com.justb81.compassduel.game.engine
 
 import com.justb81.compassduel.game.Element
-import com.justb81.compassduel.game.Position
 import com.justb81.compassduel.game.kids.KidsRules
 import com.justb81.compassduel.game.standard.StandardRules
 import com.justb81.compassduel.net.protocol.PlayerAction
@@ -35,16 +34,16 @@ class FakeClock(private var startMillis: Long = 1_000_000L) : GameClock {
 
 class GameEngineTest {
 
-    // Standard two-player setup: player 1 north of player 2
+    // Standard two-player setup: p1 → p2 bearing 180°, p2 → p1 bearing 0°.
     private val standardSetup = listOf(
-        EnginePlayerSetup(id = 1, name = "Alice", position = Position(0f, 1f), element = Element.FIRE),
-        EnginePlayerSetup(id = 2, name = "Bob", position = Position(0f, 0f), element = Element.EARTH),
+        EnginePlayerSetup(id = 1, name = "Alice", bearings = mapOf(2 to 180f), element = Element.FIRE),
+        EnginePlayerSetup(id = 2, name = "Bob", bearings = mapOf(1 to 0f), element = Element.EARTH),
     )
 
     // Kids two-player setup
     private val kidsSetup = listOf(
-        EnginePlayerSetup(id = 1, name = "Star", position = Position(0f, 1f)),
-        EnginePlayerSetup(id = 2, name = "Comet", position = Position(0f, 0f)),
+        EnginePlayerSetup(id = 1, name = "Star", bearings = mapOf(2 to 180f)),
+        EnginePlayerSetup(id = 2, name = "Comet", bearings = mapOf(1 to 0f)),
     )
 
     private fun standardEngine(

@@ -32,15 +32,17 @@ Hero, Busy Bee, or Super Sparkler).
 ## Match Flow
 
 ```
-Host / Join → Lobby (3×3 seat grid + element/sprite pick) →
-3 s facing-capture countdown → Round → Results / Rematch
+Host / Join → Lobby (bow-to-greet handshake + element/sprite pick) →
+3 s get-ready countdown → Round → Results / Rematch
 ```
 
 1. One device hosts; others discover it automatically via BLE and join.
-2. In the lobby each player picks a seat on the 3×3 grid and a character.
-3. At round start a 3-second countdown begins: all players point their phone
-   forward to capture the facing offset used for aim calibration.
-4. The round runs; the host is the sole authority for hit/catch evaluation.
+2. In the lobby each player greets every opponent: aim at them and bow (tilt the
+   phone forward and back); they bow back to accept. This captures the relative
+   bearings — no manual seat grid and no aim calibration. Then pick a character.
+3. At round start a 3-second "get ready" countdown begins.
+4. The round runs; the host is the sole authority for hit/catch evaluation and
+   cancels shared vehicle rotation so aiming stays accurate as the car/train turns.
 5. The results screen shows round winner, match score (Standard) or award cards
    (Kids). The host can start a rematch or leave.
 
@@ -52,9 +54,11 @@ The game requests these permissions at first launch:
 - `BLUETOOTH_ADVERTISE` — advertise as a host
 - `BLUETOOTH_CONNECT` — establish connections
 - `NEARBY_WIFI_DEVICES` — Wi-Fi Direct upgrade for larger payloads
+- `ACTIVITY_RECOGNITION` — optional step detection to flag a player who leaves
+  their seat mid-round; the game degrades to significant-motion-only if denied
 
-All permissions are required by the Google Nearby Connections API and are only
-used for local, offline peer-to-peer play.
+The Bluetooth/Wi-Fi permissions are required by the Google Nearby Connections API
+and are only used for local, offline peer-to-peer play.
 
 ## Deferred for a Future Release
 
@@ -105,7 +109,7 @@ Compass-Duel/
 │       └── ui/
 │           ├── navigation/     CompassDuelNavGraph, type-safe route objects, AppViewModel
 │           ├── permissions/    NearbyPermissionsGate (Compose runtime permission flow)
-│           ├── components/     CompassRing (Canvas), PlayerBadge, SeatGrid
+│           ├── components/     CompassRing (Canvas), PlayerBadge
 │           └── screens/
 │               ├── home/       HomeScreen + HomeViewModel
 │               ├── lobby/      LobbyScreen + LobbyViewModel

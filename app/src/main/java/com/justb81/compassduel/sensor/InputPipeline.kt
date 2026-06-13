@@ -61,7 +61,6 @@ class InputPipeline @Inject constructor(
      * @param scope The coroutine scope that owns the pipeline.
      * @param playerId The local player's id, included in every [NetMessage.PlayerInput].
      * @param mode The active game mode (controls gesture thresholds).
-     * @param calibration Aim calibration captured at round start.
      * @param onInput Callback invoked for each produced [NetMessage.PlayerInput].
      * @param onShieldArmProgress Callback invoked each sample with the local shield
      *   arming progress in `[0, 1]` (for the loading indicator). Defaults to a no-op.
@@ -70,7 +69,6 @@ class InputPipeline @Inject constructor(
         scope: CoroutineScope,
         playerId: Int,
         mode: GameMode,
-        calibration: AimCalibration,
         onInput: (NetMessage.PlayerInput) -> Unit,
         onShieldArmProgress: (Float) -> Unit = {},
     ) {
@@ -82,7 +80,6 @@ class InputPipeline @Inject constructor(
                 clock = clock,
                 playerId = playerId,
                 mode = mode,
-                calibration = calibration,
                 onInput = onInput,
                 onShieldArmProgress = onShieldArmProgress,
             )
@@ -128,7 +125,6 @@ class InputPipeline @Inject constructor(
          * @param clock Provides epoch millis for gesture timing.
          * @param playerId Local player identifier.
          * @param mode Game mode (controls classifier configuration).
-         * @param calibration Aim offset for normalizing azimuth.
          * @param onInput Invoked for each [NetMessage.PlayerInput] produced.
          * @param onShieldArmProgress Invoked each sample with the local shield arming progress `[0, 1]`.
          */
@@ -139,7 +135,6 @@ class InputPipeline @Inject constructor(
             clock: GameClock,
             playerId: Int,
             mode: GameMode,
-            calibration: AimCalibration,
             onInput: (NetMessage.PlayerInput) -> Unit,
             onShieldArmProgress: (Float) -> Unit = {},
         ) {
@@ -179,7 +174,7 @@ class InputPipeline @Inject constructor(
 
                 val gesture = classifier.onSample(motionSample)
                 val isShielding = classifier.isShieldActive
-                val calibratedAim = calibration.calibrate(orientation.azimuthDegrees)
+                val rawAim = orientation.azimuthDegrees
                 onShieldArmProgress(classifier.shieldArmProgress(now))
 
                 if (gesture != null) {
@@ -189,7 +184,7 @@ class InputPipeline @Inject constructor(
                     onInput(
                         NetMessage.PlayerInput(
                             playerId = playerId,
-                            aimDegrees = calibratedAim,
+                            aimDegrees = rawAim,
                             pitchDegrees = orientation.pitchDegrees,
                             action = action,
                             clientTimeMillis = now,
@@ -204,7 +199,7 @@ class InputPipeline @Inject constructor(
                     onInput(
                         NetMessage.PlayerInput(
                             playerId = playerId,
-                            aimDegrees = calibratedAim,
+                            aimDegrees = rawAim,
                             pitchDegrees = orientation.pitchDegrees,
                             action = cadenceAction,
                             clientTimeMillis = now,

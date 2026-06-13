@@ -11,10 +11,15 @@ at opponents via the magnetometer/gyroscope. There are two gestures: **Fire** (a
 quick swing/jerk toward the target) and **Shield** (hold the phone upright and
 steady for >1 s; limited to a per-round budget of 50% of the round time, enforced
 by the host and reported as `PlayerSnapshot.shieldRemainingMillis`). There is no
-dodge. All networking runs offline over the **Google Nearby Connections API**
-(P2P_STAR topology: one Host + N Clients). The Host is authoritative for hit
-detection — clients never decide hits, which prevents cheating. See
-`docs/game-spec.md` for the full concept and technical spec.
+dodge. Relative positions are established by a **"bow to greet" handshake** in the
+lobby (each player aims at every opponent and bows; the host stores the captured
+absolute bearings in `GameSession.bearingMatrix`) — there is no manual seat grid and
+no aim calibration. Aim is reported as the raw azimuth and the host cancels shared
+vehicle rotation via `CommonModeEstimator`; a player who leaves their seat
+(`MovementDetector`/`MovementPolicy`) forfeits the round and must re-greet. All
+networking runs offline over the **Google Nearby Connections API** (P2P_STAR topology:
+one Host + N Clients). The Host is authoritative for hit detection — clients never
+decide hits, which prevents cheating. See `docs/game-spec.md` for the full spec.
 
 A child-friendly variant, **Kids Mode ("Star Catchers")**, replaces combat
 with magic tag: no HP/damage/elimination, stars only go up, every player gets
@@ -31,21 +36,21 @@ Compass-Duel/
 │   └── src/main/java/com/justb81/compassduel/
 │       ├── CompassDuelApp.kt   @HiltAndroidApp entry point
 │       ├── di/                 Hilt AppModule — Android framework + engine singleton bindings
-│       ├── game/               Pure game domain — Element matchups, Bearing/hit math (unit-tested)
+│       ├── game/               Pure game domain — Bearing/hit math, CommonModeEstimator, MovementPolicy (unit-tested)
 │       │   ├── kids/           Kids Mode domain — catch evaluation, star scoring, awards
 │       │   ├── standard/       Standard Mode domain — DuelPlayer, AttackResult, MatchScore
-│       │   ├── gesture/        Pure gesture classifier — MotionSample, GestureClassifier
+│       │   ├── gesture/        Pure classifiers — GestureClassifier (fire/shield), BowDetector (greeting)
 │       │   └── engine/         Host-authoritative game engine — GameEngine, ModeRuleSet, rule sets
 │       ├── net/                NearbyConnectionManager (MessageTransport impl)
 │       │   └── protocol/       Nearby payload schema — NetMessage sealed hierarchy, MessageCodec
 │       │                       (canonical source for all on-wire message types)
-│       ├── sensor/             OrientationSensor, ShakeDetector, AimCalibration, InputPipeline
+│       ├── sensor/             OrientationSensor, ShakeDetector, MovementDetector, InputPipeline
 │       ├── session/            GameSession facade — host/client roles, SessionEvent, SessionRole
 │       ├── haptics/            HapticFeedback — mode-aware vibration wrapper (Standard / Kids)
 │       └── ui/
 │           ├── navigation/     CompassDuelNavGraph — type-safe routes, AppViewModel, SessionEvent fan-out
 │           ├── permissions/    NearbyPermissionsGate — Compose runtime-permission flow
-│           ├── components/     CompassRing (Canvas), PlayerBadge, SeatGrid
+│           ├── components/     CompassRing (Canvas), PlayerBadge
 │           └── screens/
 │               ├── home/       HomeScreen + HomeViewModel
 │               ├── lobby/      LobbyScreen + LobbyViewModel

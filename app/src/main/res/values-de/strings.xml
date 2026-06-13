@@ -31,17 +31,19 @@
     <string name="lobby_title_client">Lobby</string>
     <string name="lobby_players_header">Spieler</string>
     <string name="lobby_mode_label">Spielmodus</string>
-    <string name="lobby_seat_header">Platz wählen</string>
     <string name="lobby_character_header">Charakter wählen</string>
     <string name="lobby_start_button">Spiel starten</string>
     <string name="lobby_waiting_for_host">Warte auf den Host …</string>
 
-    <!-- Lobby — aim calibration -->
-    <string name="lobby_calibrate_header">Zielrichtung kalibrieren</string>
-    <string name="lobby_calibrate_hint">Richte dein Handy gerade auf das Spielfeld und tippe, um deine Vorwärtsrichtung festzulegen. Du kannst das jetzt in Ruhe machen, solange alle bereit sind — beim Rundenstart bleibt dann keine Hektik.</string>
-    <string name="lobby_calibrate_button">Nach vorne richten &amp; kalibrieren</string>
-    <string name="lobby_recalibrate_button">Erneut kalibrieren</string>
-    <string name="lobby_calibrated_label">✓ Zielrichtung kalibriert</string>
+    <!-- Lobby — Begrüßung -->
+    <string name="lobby_greet_header">Begrüße deine Gegner</string>
+    <string name="lobby_greet_hint">Begrüße alle am Tisch: Tippe einen Spieler an, richte dein Handy auf ihn und verbeuge dich (nach vorne kippen und zurück). Er verbeugt sich zurück. So lernt das Spiel, wo du sitzt.</string>
+    <string name="lobby_greet_button">Verbeugen</string>
+    <string name="lobby_greet_cancel">Abbrechen</string>
+    <string name="lobby_greet_pending">%1$s begrüßen</string>
+    <string name="lobby_greet_bow_now">Auf %1$s zeigen und verbeugen …</string>
+    <string name="lobby_greet_waiting_back">Warte auf Verbeugung von %1$s …</string>
+    <string name="lobby_greet_done">✓ Begrüßt</string>
 
     <!-- Lobby — transport errors -->
     <string name="lobby_error_host_failed">Hosten fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind, und versuche es erneut.</string>
@@ -52,11 +54,6 @@
     <string name="lobby_searching">Suche nach Hosts in der Nähe …</string>
     <string name="lobby_no_hosts_found">Noch kein Host gefunden. Stelle sicher, dass der Host ein Spiel gestartet hat.</string>
     <string name="lobby_connect_button">Verbinden</string>
-
-    <!-- Seat grid -->
-    <string name="seat_grid_cell_content_description">Platz %1$d</string>
-    <string name="seat_grid_cell_occupied">Platz %1$d — %2$s</string>
-    <string name="seat_grid_cell_mine">Platz %1$d — du</string>
 
     <!-- Element picker (Standard mode) -->
     <string name="element_fire">Feuer</string>
@@ -70,12 +67,8 @@
     <string name="sprite_2">Sonne</string>
     <string name="sprite_3">Komet</string>
 
-    <!-- Player badge -->
-    <string name="player_badge_seat">Platz %1$d</string>
-    <string name="player_badge_no_seat">Kein Platz</string>
-
     <!-- Game screen -->
-    <string name="game_countdown_instruction">Halte dein Handy flach und zeige nach vorne</string>
+    <string name="game_countdown_instruction">Mach dich bereit — ziele auf deine Gegner!</string>
     <string name="game_round_over">Runde beendet …</string>
     <string name="game_status_shielding">Schild aktiv</string>
     <string name="game_status_resting">Ausruhen …</string>
