@@ -18,6 +18,8 @@ import com.justb81.compassduel.sensor.AimCalibration
 import com.justb81.compassduel.sensor.InputPipeline
 import com.justb81.compassduel.sensor.OrientationSensor
 import com.justb81.compassduel.session.GameSession
+import com.justb81.compassduel.ui.components.ActionEffect
+import com.justb81.compassduel.ui.components.ActionEffectKind
 import com.justb81.compassduel.ui.components.CompassTarget
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
@@ -81,6 +83,7 @@ sealed interface GameUiState {
      * @param warningActive True when at least one opponent has us in their aim cone.
      * @param opponents Opponents for the HUD list.
      * @param flashEvent Transient overlay flash; null when no flash is active.
+     * @param actionEffect Transient projectile/impact/defensive visual; null when none is active.
      * @param restingUntilMillis Epoch millis until which the local player is resting (Kids).
      * @param debugAimDegrees Calibrated aim in debug builds; null in release.
      */
@@ -101,6 +104,9 @@ sealed interface GameUiState {
         val warningActive: Boolean,
         val opponents: List<OpponentUiModel>,
         val flashEvent: FlashEvent?,
+        val actionEffect: ActionEffect?,
+        val shielding: Boolean,
+        val dodging: Boolean,
         val restingUntilMillis: Long,
         val debugAimDegrees: Float?,
     ) : GameUiState
@@ -166,6 +172,16 @@ class GameViewModel @Inject constructor(
 
     // Last processed snapshot sequence number (to avoid re-processing haptics)
     private var lastHapticSeq = -1
+
+    // Monotonic id handed to each new ActionEffect so the overlay restarts its
+    // animation even when the same effect kind repeats back-to-back.
+    private var actionEffectTrigger = 0L
+
+    // Local player's status in the previous snapshot, used to fire the
+    // projectile effect on the IDLE/RESTING -> ATTACKING transition (the host
+    // emits no "attack started" event, so we read it off the status it already
+    // reports in every snapshot).
+    private var lastStatus = PlayerStatus.IDLE
 
     init {
         observeSensors()
@@ -240,6 +256,7 @@ class GameViewModel @Inject constructor(
                     }
                     RoundPhase.ROUND_OVER -> {
                         stopPipeline()
+                        lastStatus = PlayerStatus.IDLE
                         _uiState.value = GameUiState.RoundOver
                     }
                 }
@@ -284,6 +301,26 @@ class GameViewModel @Inject constructor(
             }
         }
 
+        val myStatus = mySnap?.status ?: PlayerStatus.IDLE
+        val effectKind = computeActionEffectKind(snapshot.events, myStatus, myId, mode)
+        val effectElement = if (mode == GameMode.STANDARD) myLobby?.element else null
+        val newEffect = effectKind?.let { kind ->
+            actionEffectTrigger += 1
+            ActionEffect(kind = kind, element = effectElement, triggerId = actionEffectTrigger)
+        }
+        val existingEffect = (_uiState.value as? GameUiState.Playing)?.actionEffect
+        val resolvedEffect = newEffect ?: existingEffect
+
+        if (newEffect != null) {
+            viewModelScope.launch {
+                delay(ACTION_EFFECT_DURATION_MILLIS)
+                val s = _uiState.value
+                if (s is GameUiState.Playing && s.actionEffect == newEffect) {
+                    _uiState.value = s.copy(actionEffect = null)
+                }
+            }
+        }
+
         return GameUiState.Playing(
             mode = mode,
             myHp = mySnap?.hp ?: StandardRules.MAX_HP,
@@ -300,6 +337,9 @@ class GameViewModel @Inject constructor(
             warningActive = warningActive,
             opponents = opponents,
             flashEvent = resolvedFlash,
+            actionEffect = resolvedEffect,
+            shielding = myStatus == PlayerStatus.SHIELDING,
+            dodging = myStatus == PlayerStatus.DODGING,
             restingUntilMillis = mySnap?.restingUntilMillis ?: 0L,
             debugAimDegrees = if (BuildConfig.DEBUG) calibratedAim else null,
         )
@@ -425,6 +465,49 @@ class GameViewModel @Inject constructor(
     }
 
     // -------------------------------------------------------------------------
+    // Action-effect helper
+    // -------------------------------------------------------------------------
+
+    /**
+     * Picks the one-shot [ActionEffectKind] for this snapshot, branching on mode.
+     *
+     * Impacts are driven by host [com.justb81.compassduel.net.protocol.GameEvent]s
+     * (HIT / BLOCKED in Standard, CAUGHT / BUBBLED in Kids). The projectile is
+     * fired on the local player's transition into [PlayerStatus.ATTACKING], which
+     * the host already reports in every snapshot — no new payload is introduced.
+     *
+     * Kids Mode never returns [ActionEffectKind.DAMAGE_TAKEN]; incoming
+     * sparkles read as friendly catches/bubbles only.
+     */
+    private fun computeActionEffectKind(
+        events: List<com.justb81.compassduel.net.protocol.GameEvent>,
+        myStatus: PlayerStatus,
+        myId: Int,
+        mode: GameMode,
+    ): ActionEffectKind? {
+        val justStartedAttacking = myStatus == PlayerStatus.ATTACKING && lastStatus != PlayerStatus.ATTACKING
+        lastStatus = myStatus
+
+        val fromEvents = events.firstNotNullOfOrNull { event ->
+            when {
+                mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.actorId == myId ->
+                    ActionEffectKind.IMPACT_LANDED
+                mode == GameMode.STANDARD && event.type == GameEventType.BLOCKED && event.actorId == myId ->
+                    ActionEffectKind.IMPACT_BLOCKED
+                mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.targetId == myId ->
+                    ActionEffectKind.DAMAGE_TAKEN
+                mode == GameMode.KIDS && event.type == GameEventType.CAUGHT && event.actorId == myId ->
+                    ActionEffectKind.IMPACT_LANDED
+                mode == GameMode.KIDS && event.type == GameEventType.BUBBLED && event.targetId == myId ->
+                    ActionEffectKind.IMPACT_BLOCKED
+                else -> null
+            }
+        }
+        // Impacts win over the launch effect within the same snapshot.
+        return fromEvents ?: if (justStartedAttacking) ActionEffectKind.PROJECTILE_FIRED else null
+    }
+
+    // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
 
@@ -445,6 +528,7 @@ class GameViewModel @Inject constructor(
         private const val MILLIS_PER_SECOND = 1_000L
         private const val GRID_COLUMNS = 3
         private const val FLASH_DURATION_MILLIS = 500L
+        private const val ACTION_EFFECT_DURATION_MILLIS = 500L
 
         /** Emoji + name label for each element (keyed by enum name). */
         private val ELEMENT_EMOJIS = mapOf(

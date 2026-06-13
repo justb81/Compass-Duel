@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -42,6 +43,7 @@ import com.justb81.compassduel.BuildConfig
 import com.justb81.compassduel.R
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.PlayerStatus
+import com.justb81.compassduel.ui.components.ActionEffectOverlay
 import com.justb81.compassduel.ui.components.CompassRing
 
 private val SCREEN_PADDING_DP = 16.dp
@@ -55,6 +57,9 @@ private val WARNING_COLOR_KIDS = Color(0xFFFFEB3B)
 private val HIGHLIGHT_COLOR = Color(0xFF4CAF50)
 private val HELP_CARD_MAX_WIDTH_DP = 360.dp
 private val HELP_CARD_PADDING_DP = 20.dp
+
+// Mirrors CompassRing's aspect ratio so the effect overlay shares its geometry.
+private const val COMPASS_ASPECT_RATIO = 1f
 
 /**
  * Game screen — renders COUNTDOWN, PLAYING and ROUND_OVER phases.
@@ -283,20 +288,35 @@ private fun PlayingContent(state: GameUiState.Playing) {
                 GameMode.KIDS -> KidsHud(state)
             }
 
-            // Compass ring — ring rotates with local sensor at full rate
+            // Compass ring — ring rotates with local sensor at full rate.
+            // The action-effect overlay is layered directly on top of the ring
+            // and shares its geometry so projectiles/impacts land on the reticle.
             val warningColor = if (state.mode == GameMode.STANDARD) {
                 Color.Red
             } else {
                 WARNING_COLOR_KIDS
             }
-            CompassRing(
-                currentAzimuthDegrees = state.azimuthDegrees,
-                targets = state.compassTargets,
-                isTargeted = state.warningActive,
-                warningColor = warningColor,
-                highlightColor = HIGHLIGHT_COLOR,
+            Box(
                 modifier = Modifier.weight(1f),
-            )
+                contentAlignment = Alignment.Center,
+            ) {
+                CompassRing(
+                    currentAzimuthDegrees = state.azimuthDegrees,
+                    targets = state.compassTargets,
+                    isTargeted = state.warningActive,
+                    warningColor = warningColor,
+                    highlightColor = HIGHLIGHT_COLOR,
+                )
+                ActionEffectOverlay(
+                    effect = state.actionEffect,
+                    mode = state.mode,
+                    shielding = state.shielding,
+                    dodging = state.dodging,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(COMPASS_ASPECT_RATIO),
+                )
+            }
 
             // Bottom status line
             StatusLine(state)
