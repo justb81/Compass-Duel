@@ -257,7 +257,7 @@ interface ModeRuleSet {
  * @param scope Coroutine scope that owns the tick loop.
  * @param tickMillis Tick interval in milliseconds. Defaults to 100 ms.
  */
-class GameEngine(
+open class GameEngine(
     private val rules: ModeRuleSet,
     private val clock: GameClock,
     private val scope: CoroutineScope,
@@ -287,9 +287,9 @@ class GameEngine(
      * Any previously running tick loop is cancelled first.
      *
      * @param playerSetup Per-player seat and character data.
-     * @param index Zero-based round index.
+     * @param roundIndex Zero-based round index.
      */
-    fun startRound(playerSetup: List<EnginePlayerSetup>, index: Int) {
+    fun startRound(playerSetup: List<EnginePlayerSetup>, roundIndex: Int) {
         tickJob?.cancel()
         synchronized(inputLock) {
             continuousInputs.clear()
@@ -297,7 +297,7 @@ class GameEngine(
         }
 
         setup = playerSetup
-        roundIndex = index
+        this.roundIndex = roundIndex
         engineState = rules.initialState(playerSetup)
         roundStartMillis = clock.nowMillis()
         activePhaseStartMillis = roundStartMillis + COUNTDOWN_MILLIS
@@ -344,7 +344,7 @@ class GameEngine(
      * Only meaningful once [snapshots] has emitted a snapshot with
      * [com.justb81.compassduel.net.protocol.RoundPhase.ROUND_OVER].
      */
-    fun roundOutcome(): RoundOutcome? = engineState?.let { rules.roundOutcome(it) }
+    open fun roundOutcome(): RoundOutcome? = engineState?.let { rules.roundOutcome(it) }
 
     /** Stops the tick loop and cancels the round. */
     fun stop() {

@@ -14,6 +14,8 @@ import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -522,11 +524,7 @@ class GameSessionTest {
         org.junit.jupiter.api.Assertions.assertTrue(condition, lazyMessage)
     }
 
-    private fun <T> TestScope.async(block: suspend () -> T): kotlinx.coroutines.Deferred<T> =
-        this.backgroundScope.async { block() }
+    /** Launches [block] on [TestScope.backgroundScope] so it is cancelled with the test. */
+    private fun <T> TestScope.async(block: suspend () -> T): Deferred<T> =
+        backgroundScope.async(block = { block() })
 }
-
-// Extension to use backgroundScope easily in tests
-private fun <T> kotlinx.coroutines.CoroutineScope.async(
-    block: suspend kotlinx.coroutines.CoroutineScope.() -> T,
-): kotlinx.coroutines.Deferred<T> = kotlinx.coroutines.async { block() }
