@@ -17,12 +17,12 @@ import javax.inject.Singleton
  * ### Sign convention for pitch
  * The remap `remapCoordinateSystem(AXIS_X, AXIS_Z)` is applied so that the device
  * is treated as held upright in portrait mode with the screen facing the player.
- * In this frame `getOrientation` returns a raw pitch that is **negative** when the
+ * In this frame `getOrientation` returns a pitch that is **positive** when the
  * top of the phone tilts away from the player (aiming forward/down).
  *
- * [pitchDegrees] inverts this sign so that **tilting the top of the phone away from
- * the player (aiming forward and slightly downward) yields a positive value**,
- * matching the gesture-classifier convention where a positive pitch triggers an ATTACK.
+ * So **tilting the top of the phone away from the player (aiming forward and
+ * slightly downward, i.e. bowing toward the opponent) yields a positive value**,
+ * which is the direction the greeting bow is recognised in.
  *
  * @param azimuthDegrees Magnetic north-relative heading in `[0, 360)`.
  * @param pitchDegrees Forward tilt: positive = top of phone away from player (aiming forward).
@@ -77,9 +77,10 @@ class OrientationSensor @Inject constructor(
                 SensorManager.getOrientation(remappedMatrix, orientationValues)
 
                 val azimuth = (Math.toDegrees(orientationValues[0].toDouble()).toFloat() + FULL_CIRCLE) % FULL_CIRCLE
-                // Raw pitch from getOrientation is negative when tilting forward in this remap;
-                // negate so positive pitch = top of phone away from player (aiming forward).
-                val pitch = -Math.toDegrees(orientationValues[1].toDouble()).toFloat()
+                // In this remap getOrientation returns a pitch that is positive when the top of the
+                // phone tilts away from the player (aiming forward / bowing toward the opponent),
+                // matching OrientationSample.pitchDegrees — no negation required.
+                val pitch = Math.toDegrees(orientationValues[1].toDouble()).toFloat()
                 val roll = Math.toDegrees(orientationValues[2].toDouble()).toFloat()
 
                 trySend(OrientationSample(azimuth, pitch, roll, currentAccuracy.get()))
