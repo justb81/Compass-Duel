@@ -10,11 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChildCare
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -40,6 +36,10 @@ private val SCREEN_PADDING_DP = 24.dp
 private val ITEM_SPACING_DP = 16.dp
 private val SECTION_SPACING_DP = 32.dp
 private val BUTTON_SPACING_DP = 12.dp
+
+/** Emoji mode markers; material-icons-extended is intentionally not a dependency. */
+private const val MODE_ICON_STANDARD = "⚔️"
+private const val MODE_ICON_KIDS = "🌟"
 
 /**
  * Home screen: enter player name, select game mode, then host or join a game.
@@ -119,7 +119,7 @@ private fun ModeSelector(
             selected = selectedMode == GameMode.STANDARD,
             onClick = { onModeSelected(GameMode.STANDARD) },
             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-            icon = { Icon(imageVector = Icons.Filled.Shield, contentDescription = null) },
+            icon = { Text(text = MODE_ICON_STANDARD) },
         ) {
             Text(text = stringResource(R.string.home_mode_standard))
         }
@@ -127,7 +127,7 @@ private fun ModeSelector(
             selected = selectedMode == GameMode.KIDS,
             onClick = { onModeSelected(GameMode.KIDS) },
             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-            icon = { Icon(imageVector = Icons.Filled.ChildCare, contentDescription = null) },
+            icon = { Text(text = MODE_ICON_KIDS) },
         ) {
             Text(text = stringResource(R.string.home_mode_kids))
         }

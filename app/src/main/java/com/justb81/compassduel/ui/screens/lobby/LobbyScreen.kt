@@ -14,13 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChildCare
-import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -58,6 +54,10 @@ private val BADGE_SPACING_DP = 8.dp
 private val ELEMENT_BUTTON_HEIGHT_DP = 56.dp
 private val KIDS_BUTTON_HEIGHT_DP = 72.dp
 private val PROGRESS_INDICATOR_SIZE_DP = 24.dp
+
+/** Emoji mode markers; material-icons-extended is intentionally not a dependency. */
+private const val MODE_ICON_STANDARD = "⚔️"
+private const val MODE_ICON_KIDS = "🌟"
 
 // Pastel colours for Kids Mode character buttons
 private val PASTEL_STAR = Color(0xFFFFEB3B)
@@ -327,7 +327,7 @@ private fun ModeSelectorRow(
             selected = selectedMode == GameMode.STANDARD,
             onClick = { onModeSelected(GameMode.STANDARD) },
             shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
-            icon = { Icon(imageVector = Icons.Filled.Shield, contentDescription = null) },
+            icon = { Text(text = MODE_ICON_STANDARD) },
         ) {
             Text(text = stringResource(R.string.home_mode_standard))
         }
@@ -335,7 +335,7 @@ private fun ModeSelectorRow(
             selected = selectedMode == GameMode.KIDS,
             onClick = { onModeSelected(GameMode.KIDS) },
             shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
-            icon = { Icon(imageVector = Icons.Filled.ChildCare, contentDescription = null) },
+            icon = { Text(text = MODE_ICON_KIDS) },
         ) {
             Text(text = stringResource(R.string.home_mode_kids))
         }
