@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/justb81/Compass-Duel/compare/v0.4.0...v0.4.1) (2026-06-13)
+
+
+### Bug Fixes
+
+* **ci:** install NDK so release build generates native debug symbols ([#25](https://github.com/justb81/Compass-Duel/issues/25)) ([66e69aa](https://github.com/justb81/Compass-Duel/commit/66e69aaf90982c34f7c865fd678c4fc891bae914))
+
 ## [0.4.0](https://github.com/justb81/Compass-Duel/compare/v0.3.2...v0.4.0) (2026-06-13)
 
 
