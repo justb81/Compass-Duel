@@ -1,11 +1,11 @@
 package com.justb81.compassduel.session
 
+import app.cash.turbine.test
 import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.engine.GameEngine
 import com.justb81.compassduel.game.engine.ModeRuleSet
 import com.justb81.compassduel.game.engine.RoundOutcome
-import com.justb81.compassduel.game.engine.StandardRuleSet
 import com.justb81.compassduel.game.kids.KidsAward
 import com.justb81.compassduel.game.kids.KidsRoundStats
 import com.justb81.compassduel.net.ConnectionEvent
@@ -14,18 +14,16 @@ import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
-import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -215,9 +213,12 @@ class GameSessionTest {
         session.connectTo(endpointId = "host-ep")
         advanceUntilIdle()
 
-        // Simulate the connected event from transport
+        // Simulate the connected event from transport.
+        // runCurrent() drives the backgroundScope connection-listener coroutine
+        // that is already subscribed and waiting; advanceUntilIdle() would also work
+        // for pure-lobby tests but is avoided here to keep the intent explicit.
         transport.emitConnection(ConnectionEvent.Connected("host-ep", "host-ep"))
-        advanceUntilIdle()
+        runCurrent()
 
         val helloMessages = transport.sentMessages.filterIsInstance<NetMessage.ClientHello>()
         assertEquals(1, helloMessages.size)
@@ -234,8 +235,11 @@ class GameSessionTest {
         session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
         advanceUntilIdle()
 
+        // runCurrent() flushes the backgroundScope message-listener coroutine that was
+        // rescheduled by SharedFlow.emit() without advancing virtual time (safe even if
+        // an engine tick loop were running, though none is active here).
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        advanceUntilIdle()
+        runCurrent()
 
         val lobby = session.lobby.value
         assertEquals(2, lobby?.players?.size)
@@ -249,10 +253,10 @@ class GameSessionTest {
         advanceUntilIdle()
 
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        advanceUntilIdle()
+        runCurrent()
 
         transport.emitIncoming("client-ep", NetMessage.SeatChosen(cell = 3))
-        advanceUntilIdle()
+        runCurrent()
 
         val bob = session.lobby.value?.players?.find { it.name == "Bob" }
         assertEquals(3, bob?.seatCell)
@@ -265,10 +269,10 @@ class GameSessionTest {
         advanceUntilIdle()
 
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        advanceUntilIdle()
+        runCurrent()
 
         transport.emitIncoming("client-ep", NetMessage.CharacterChosen(element = Element.FIRE))
-        advanceUntilIdle()
+        runCurrent()
 
         val bob = session.lobby.value?.players?.find { it.name == "Bob" }
         assertTrue(bob?.ready == true)
@@ -291,7 +295,7 @@ class GameSessionTest {
             yourPlayerId = 2,
         )
         transport.emitIncoming("host-ep", lobbyState)
-        advanceUntilIdle()
+        runCurrent()
 
         assertEquals(GameMode.KIDS, session.lobby.value?.mode)
     }
@@ -302,22 +306,25 @@ class GameSessionTest {
         session.joinLobby(playerName = "Bob")
         advanceUntilIdle()
 
-        val eventsDeferred = testScope.async { session.sessionEvents.first() }
-        advanceUntilIdle()
-
-        transport.emitIncoming(
-            "host-ep",
-            NetMessage.RoundStart(
-                mode = GameMode.STANDARD,
-                roundIndex = 0,
-                roundDurationSeconds = 90,
-                players = emptyList(),
-                facingCaptureSeconds = 3,
-            ),
-        )
-        advanceUntilIdle()
-
-        assertEquals(SessionEvent.RoundStarted, eventsDeferred.await())
+        // Turbine subscribes to the SharedFlow before the emission so tryEmit()
+        // finds an active subscriber. awaitItem() suspends and the StandardTestDispatcher
+        // schedules the message-listener and event-delivery coroutines within the
+        // same runCurrent() pass that Turbine drives internally.
+        session.sessionEvents.test {
+            transport.emitIncoming(
+                "host-ep",
+                NetMessage.RoundStart(
+                    mode = GameMode.STANDARD,
+                    roundIndex = 0,
+                    roundDurationSeconds = 90,
+                    players = emptyList(),
+                    facingCaptureSeconds = 3,
+                ),
+            )
+            runCurrent()
+            assertEquals(SessionEvent.RoundStarted, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -326,13 +333,12 @@ class GameSessionTest {
         session.joinLobby(playerName = "Bob")
         advanceUntilIdle()
 
-        val eventsDeferred = testScope.async { session.sessionEvents.first() }
-        advanceUntilIdle()
-
-        transport.emitIncoming("host-ep", NetMessage.Rematch)
-        advanceUntilIdle()
-
-        assertEquals(SessionEvent.RematchRequested, eventsDeferred.await())
+        session.sessionEvents.test {
+            transport.emitIncoming("host-ep", NetMessage.Rematch)
+            runCurrent()
+            assertEquals(SessionEvent.RematchRequested, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -400,10 +406,10 @@ class GameSessionTest {
         advanceUntilIdle()
 
         transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
-        advanceUntilIdle()
+        runCurrent()
 
         transport.emitConnection(ConnectionEvent.Disconnected("client-ep"))
-        advanceUntilIdle()
+        runCurrent()
 
         val lobby = session.lobby.value
         assertEquals(1, lobby?.players?.size)
@@ -418,13 +424,12 @@ class GameSessionTest {
         session.connectTo("host-ep")
         advanceUntilIdle()
 
-        val eventsDeferred = testScope.async { session.sessionEvents.first() }
-        advanceUntilIdle()
-
-        transport.emitConnection(ConnectionEvent.Disconnected("host-ep"))
-        advanceUntilIdle()
-
-        assertEquals(SessionEvent.PeerLost, eventsDeferred.await())
+        session.sessionEvents.test {
+            transport.emitConnection(ConnectionEvent.Disconnected("host-ep"))
+            runCurrent()
+            assertEquals(SessionEvent.PeerLost, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -432,70 +437,82 @@ class GameSessionTest {
     // ---------------------------------------------------------------------------
 
     @Test
-    fun `kids round end carries non-zero bubbleBlocks and sparklesThrown from engine outcome`() = testScope.runTest {
-        val aliceId = 1
-        val bobId = 2
-        val kidsStats = mapOf(
-            aliceId to KidsRoundStats(playerId = aliceId, stars = 3, bubbleBlocks = 2, sparklesThrown = 5),
-            bobId to KidsRoundStats(playerId = bobId, stars = 1, bubbleBlocks = 0, sparklesThrown = 3),
-        )
-        val kidsAwards = mapOf(aliceId to KidsAward.STAR_CHAMPION, bobId to KidsAward.SUPER_SPARKLER)
-        val stubbedOutcome = RoundOutcome.KidsOutcome(stats = kidsStats, awards = kidsAwards)
+    fun `kids round end carries non-zero bubbleBlocks and sparklesThrown from engine outcome`() =
+        testScope.runTest {
+            val aliceId = 1
+            val bobId = 2
+            val kidsStats = mapOf(
+                aliceId to KidsRoundStats(playerId = aliceId, stars = 3, bubbleBlocks = 2, sparklesThrown = 5),
+                bobId to KidsRoundStats(playerId = bobId, stars = 1, bubbleBlocks = 0, sparklesThrown = 3),
+            )
+            val kidsAwards = mapOf(aliceId to KidsAward.STAR_CHAMPION, bobId to KidsAward.SUPER_SPARKLER)
+            val stubbedOutcome = RoundOutcome.KidsOutcome(stats = kidsStats, awards = kidsAwards)
 
-        val session = buildSession(
-            engineFactory = GameEngineFactory { rules, clk, scp ->
-                StubEngine(rules, clk, scp, stubbedOutcome)
-            },
-        )
+            val session = buildSession(
+                engineFactory = GameEngineFactory { rules, clk, scp ->
+                    StubEngine(rules, clk, scp, stubbedOutcome)
+                },
+            )
 
-        session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
-        advanceUntilIdle()
+            session.hostLobby(playerName = "Alice", mode = GameMode.KIDS)
+            advanceUntilIdle()
 
-        transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
-        advanceUntilIdle()
+            // Use runCurrent() after each emit so the backgroundScope message-listener
+            // processes the message without triggering the engine tick-loop to run
+            // indefinitely (which advanceUntilIdle() would do once the engine starts).
+            transport.emitIncoming("ep2", NetMessage.ClientHello("Bob"))
+            runCurrent()
 
-        session.chooseSeat(cell = 0)
-        transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
-        advanceUntilIdle()
+            session.chooseSeat(cell = 0)
+            transport.emitIncoming("ep2", NetMessage.SeatChosen(cell = 1))
+            runCurrent()
 
-        session.chooseCharacter(spriteId = 0)
-        transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
-        advanceUntilIdle()
+            session.chooseCharacter(spriteId = 0)
+            transport.emitIncoming("ep2", NetMessage.CharacterChosen(spriteId = 1))
+            runCurrent()
 
-        session.startMatch()
-        advanceUntilIdle()
+            session.startMatch()
+            // runCurrent() starts the engine tick loop and snapshotJob without
+            // advancing virtual time past any delay() boundary.
+            runCurrent()
 
-        // Advance fake clock past countdown (3 s) then past round duration (60 s),
-        // and advance the coroutine scheduler by the same amount so the tick loop runs.
-        val countdownMs = 3_100L
-        val roundMs = 60_100L
-        clock.advance(countdownMs)
-        advanceTimeBy(countdownMs)
-        advanceUntilIdle()
+            // Advance fake clock past countdown (3 s) then past round duration (60 s),
+            // and step the coroutine scheduler by the same amount so the tick loop
+            // fires correctly.  advanceUntilIdle() is intentionally avoided here: the
+            // engine tick loop (while(isActive) { tick(); delay(100) }) runs on the
+            // backgroundScope scheduler and would spin forever if we called
+            // advanceUntilIdle().  advanceTimeBy() + runCurrent() advance exactly as
+            // far as needed and no further.
+            val countdownMs = 3_100L
+            val roundMs = 60_100L
+            clock.advance(countdownMs)
+            advanceTimeBy(countdownMs)
+            runCurrent()
 
-        clock.advance(roundMs)
-        advanceTimeBy(roundMs)
-        advanceUntilIdle()
+            clock.advance(roundMs)
+            advanceTimeBy(roundMs)
+            runCurrent()
 
-        // Allow the ROUND_END_DELAY_MILLIS (200 ms) to elapse
-        val roundEndDelayMs = 200L
-        clock.advance(roundEndDelayMs)
-        advanceTimeBy(roundEndDelayMs)
-        advanceUntilIdle()
+            // Allow the ROUND_END_DELAY_MILLIS (200 ms) delay inside
+            // computeAndBroadcastRoundEnd to elapse.
+            val roundEndDelayMs = 200L
+            clock.advance(roundEndDelayMs)
+            advanceTimeBy(roundEndDelayMs)
+            runCurrent()
 
-        val roundEnd = session.roundEnd.value
-        assertNotNull(roundEnd)
-        assertNotNull(roundEnd?.kidsStats)
+            val roundEnd = session.roundEnd.value
+            assertNotNull(roundEnd)
+            assertNotNull(roundEnd?.kidsStats)
 
-        val aliceStats = roundEnd!!.kidsStats!!.find { it.playerId == aliceId }
-        assertNotNull(aliceStats)
-        assertEquals(2, aliceStats!!.bubbleBlocks)
-        assertEquals(5, aliceStats.sparklesThrown)
+            val aliceStats = roundEnd!!.kidsStats!!.find { it.playerId == aliceId }
+            assertNotNull(aliceStats)
+            assertEquals(2, aliceStats!!.bubbleBlocks)
+            assertEquals(5, aliceStats.sparklesThrown)
 
-        val bobStats = roundEnd.kidsStats!!.find { it.playerId == bobId }
-        assertNotNull(bobStats)
-        assertEquals(3, bobStats!!.sparklesThrown)
-    }
+            val bobStats = roundEnd.kidsStats!!.find { it.playerId == bobId }
+            assertNotNull(bobStats)
+            assertEquals(3, bobStats!!.sparklesThrown)
+        }
 
     // ---------------------------------------------------------------------------
     // startMatch validation
@@ -525,8 +542,4 @@ class GameSessionTest {
     private fun assertTrue(condition: Boolean, lazyMessage: () -> String) {
         org.junit.jupiter.api.Assertions.assertTrue(condition, lazyMessage)
     }
-
-    /** Launches [block] on [TestScope.backgroundScope] so it is cancelled with the test. */
-    private fun <T> TestScope.async(block: suspend () -> T): Deferred<T> =
-        backgroundScope.async(block = { block() })
 }
