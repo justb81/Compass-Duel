@@ -15,6 +15,7 @@ import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.net.protocol.PlayerStatus
 import com.justb81.compassduel.net.protocol.RoundPhase
 import com.justb81.compassduel.sensor.AimCalibration
+import com.justb81.compassduel.sensor.AimCalibrationStore
 import com.justb81.compassduel.sensor.InputPipeline
 import com.justb81.compassduel.sensor.OrientationSensor
 import com.justb81.compassduel.session.GameSession
@@ -136,9 +137,11 @@ enum class FlashEvent { GREEN, RED, TWINKLE }
  * while game logic stays at 10 Hz.
  *
  * ### Calibration flow
- * During [RoundPhase.COUNTDOWN] the ViewModel samples the raw azimuth from
- * [OrientationSensor]. When the phase transitions to [RoundPhase.PLAYING] it
- * captures the latest azimuth as [AimCalibration.facingOffsetDegrees] and starts
+ * Players preferably calibrate in the lobby (see
+ * [com.justb81.compassduel.ui.screens.lobby.LobbyViewModel]); that offset is held in
+ * [AimCalibrationStore]. When the phase transitions to [RoundPhase.PLAYING] the ViewModel
+ * uses the lobby-captured [AimCalibration] if present, otherwise it falls back to capturing
+ * the latest raw azimuth from [OrientationSensor] at the buzzer. Either way it then starts
  * [InputPipeline] with the result.
  *
  * ### Haptic dispatch
@@ -152,6 +155,7 @@ class GameViewModel @Inject constructor(
     private val orientationSensor: OrientationSensor,
     private val inputPipeline: InputPipeline,
     private val hapticFeedback: HapticFeedback,
+    private val calibrationStore: AimCalibrationStore,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow<GameUiState>(
@@ -232,10 +236,11 @@ class GameViewModel @Inject constructor(
                         _uiState.value = GameUiState.Countdown(secondsLeft, mode)
                     }
                     RoundPhase.PLAYING -> {
-                        // Capture facing offset once on transition
+                        // Use the lobby-captured calibration if the player set one there;
+                        // otherwise fall back to capturing the heading at the buzzer.
                         if (calibration == null && !pipelineStarted) {
-                            val offset = latestRawAzimuth
-                            val cal = AimCalibration(offset)
+                            val cal = calibrationStore.calibration.value
+                                ?: AimCalibration(latestRawAzimuth)
                             calibration = cal
                             calibratedAim = cal.calibrate(latestRawAzimuth)
                             pipelineStarted = true

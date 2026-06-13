@@ -9,6 +9,8 @@ import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.TransportError
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
+import com.justb81.compassduel.sensor.AimCalibrationStore
+import com.justb81.compassduel.sensor.OrientationSensor
 import com.justb81.compassduel.session.GameSession
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -36,6 +38,8 @@ data class LobbyUiState(
     val startError: String? = null,
     /** String resource for a transport failure to surface via Snackbar (null = no error). */
     @StringRes val transportErrorRes: Int? = null,
+    /** True once the local player has captured their forward-facing aim offset in the lobby. */
+    val isCalibrated: Boolean = false,
 )
 
 /**
@@ -45,14 +49,21 @@ data class LobbyUiState(
  * so that host and client see a consistent picture of the lobby.
  *
  * @param session The singleton game session facade.
+ * @param orientationSensor Source of raw compass azimuth for in-lobby aim calibration.
+ * @param calibrationStore Holds the captured aim offset for the game screen to consume.
  */
 @HiltViewModel
 class LobbyViewModel @Inject constructor(
     private val session: GameSession,
+    private val orientationSensor: OrientationSensor,
+    private val calibrationStore: AimCalibrationStore,
 ) : ViewModel() {
 
     private val _startError = MutableStateFlow<String?>(null)
     private val _transportErrorRes = MutableStateFlow<Int?>(null)
+
+    // Latest raw azimuth from the sensor; sampled on tap to build the calibration.
+    private var latestRawAzimuth = 0f
 
     init {
         // Surface transport failures (e.g. advertising/discovery could not start) as a
@@ -60,6 +71,12 @@ class LobbyViewModel @Inject constructor(
         viewModelScope.launch {
             session.transportErrors.collect { error ->
                 _transportErrorRes.value = error.toMessageRes()
+            }
+        }
+        // Track the latest raw azimuth so calibration captures the current heading on tap.
+        viewModelScope.launch {
+            orientationSensor.samples().collect { sample ->
+                latestRawAzimuth = sample.azimuthDegrees
             }
         }
     }
@@ -70,7 +87,8 @@ class LobbyViewModel @Inject constructor(
         session.discoveredEndpoints,
         _startError,
         _transportErrorRes,
-    ) { lobby, endpoints, startError, transportErrorRes ->
+        calibrationStore.calibration,
+    ) { lobby, endpoints, startError, transportErrorRes, calibration ->
         if (lobby != null) {
             LobbyUiState(
                 players = lobby.players,
@@ -80,6 +98,7 @@ class LobbyViewModel @Inject constructor(
                 isSearching = false,
                 startError = startError,
                 transportErrorRes = transportErrorRes,
+                isCalibrated = calibration != null,
             )
         } else {
             LobbyUiState(
@@ -87,6 +106,7 @@ class LobbyViewModel @Inject constructor(
                 isSearching = true,
                 startError = startError,
                 transportErrorRes = transportErrorRes,
+                isCalibrated = calibration != null,
             )
         }
     }.stateIn(
@@ -94,6 +114,16 @@ class LobbyViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(SUBSCRIBE_STOP_TIMEOUT_MILLIS),
         initialValue = LobbyUiState(),
     )
+
+    /**
+     * Captures the local player's current forward-facing heading as their aim offset.
+     *
+     * Called when the player points the phone forward and taps "Calibrate". The offset is
+     * stored locally and carried into the next round; it is never sent over the network.
+     */
+    fun calibrateAim() {
+        calibrationStore.capture(latestRawAzimuth)
+    }
 
     /** Changes the game mode (host only). */
     fun setMode(mode: GameMode) {

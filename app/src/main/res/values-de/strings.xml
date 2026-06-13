@@ -36,6 +36,13 @@
     <string name="lobby_start_button">Spiel starten</string>
     <string name="lobby_waiting_for_host">Warte auf den Host …</string>
 
+    <!-- Lobby — aim calibration -->
+    <string name="lobby_calibrate_header">Zielrichtung kalibrieren</string>
+    <string name="lobby_calibrate_hint">Richte dein Handy gerade auf das Spielfeld und tippe, um deine Vorwärtsrichtung festzulegen. Du kannst das jetzt in Ruhe machen, solange alle bereit sind — beim Rundenstart bleibt dann keine Hektik.</string>
+    <string name="lobby_calibrate_button">Nach vorne richten &amp; kalibrieren</string>
+    <string name="lobby_recalibrate_button">Erneut kalibrieren</string>
+    <string name="lobby_calibrated_label">✓ Zielrichtung kalibriert</string>
+
     <!-- Lobby — transport errors -->
     <string name="lobby_error_host_failed">Hosten fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind, und versuche es erneut.</string>
     <string name="lobby_error_discovery_failed">Suche nach Hosts fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind.</string>

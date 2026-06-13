@@ -36,6 +36,13 @@
     <string name="lobby_start_button">Start game</string>
     <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
 
+    <!-- Lobby — aim calibration -->
+    <string name="lobby_calibrate_header">Calibrate your aim</string>
+    <string name="lobby_calibrate_hint">Point your phone straight ahead at the play area, then tap to set your forward direction. You can do this now while everyone is ready — no rush once the round starts.</string>
+    <string name="lobby_calibrate_button">Point forward &amp; calibrate</string>
+    <string name="lobby_recalibrate_button">Calibrate again</string>
+    <string name="lobby_calibrated_label">✓ Aim calibrated</string>
+
     <!-- Lobby — transport errors -->
     <string name="lobby_error_host_failed">Couldn\'t start hosting. Make sure Bluetooth and Wi-Fi are on, then try again.</string>
     <string name="lobby_error_discovery_failed">Couldn\'t search for hosts. Make sure Bluetooth and Wi-Fi are on.</string>
