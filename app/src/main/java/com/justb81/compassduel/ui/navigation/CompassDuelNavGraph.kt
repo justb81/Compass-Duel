@@ -1,6 +1,11 @@
 package com.justb81.compassduel.ui.navigation
 
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -9,13 +14,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.justb81.compassduel.R
+import com.justb81.compassduel.crash.CrashReporter
 import com.justb81.compassduel.session.SessionEvent
 import com.justb81.compassduel.ui.screens.game.GameScreen
 import com.justb81.compassduel.ui.screens.home.HomeScreen
@@ -64,6 +75,11 @@ data object ResultsRoute
 fun CompassDuelNavGraph(navController: NavHostController) {
     val appViewModel: AppViewModel = hiltViewModel()
 
+    val context = LocalContext.current
+    // Read (and clear) the previous crash once per composition; shown in a dialog
+    // so testers can copy the stack trace even without a debugger attached.
+    var lastCrash by rememberSaveable { mutableStateOf(CrashReporter.consumeLastCrash(context)) }
+
     var showPeerLostDialog by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(appViewModel) {
@@ -79,6 +95,13 @@ fun CompassDuelNavGraph(navController: NavHostController) {
                 SessionEvent.PeerLost -> showPeerLostDialog = true
             }
         }
+    }
+
+    lastCrash?.let { crashText ->
+        CrashReportDialog(
+            details = crashText,
+            onDismiss = { lastCrash = null },
+        )
     }
 
     if (showPeerLostDialog) {
@@ -115,6 +138,43 @@ fun CompassDuelNavGraph(navController: NavHostController) {
         }
     }
 }
+
+@Composable
+private fun CrashReportDialog(details: String, onDismiss: () -> Unit) {
+    val clipboard = LocalClipboardManager.current
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(text = stringResource(R.string.crash_dialog_title)) },
+        text = {
+            SelectionContainer {
+                Text(
+                    text = stringResource(R.string.crash_dialog_message) + "\n\n" + details,
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier
+                        .heightIn(max = CRASH_DIALOG_MAX_HEIGHT_DP.dp)
+                        .verticalScroll(rememberScrollState()),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    clipboard.setText(AnnotatedString(details))
+                    onDismiss()
+                },
+            ) {
+                Text(text = stringResource(R.string.crash_dialog_copy))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(text = stringResource(R.string.crash_dialog_dismiss))
+            }
+        },
+    )
+}
+
+private const val CRASH_DIALOG_MAX_HEIGHT_DP = 320
 
 @Composable
 private fun PeerLostDialog(onDismiss: () -> Unit) {

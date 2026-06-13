@@ -15,6 +15,12 @@
     <string name="home_host_game">Spiel hosten</string>
     <string name="home_join_game">Spiel beitreten</string>
 
+    <!-- Crash report dialog (shown on next launch after an uncaught exception) -->
+    <string name="crash_dialog_title">Die App wurde unerwartet beendet</string>
+    <string name="crash_dialog_message">Entschuldige bitte. Die Details unten zeigen, was beim letzten Mal schiefgelaufen ist. Tippe auf Kopieren und sende sie an den Entwickler, um bei der Behebung zu helfen.</string>
+    <string name="crash_dialog_copy">Details kopieren</string>
+    <string name="crash_dialog_dismiss">Schließen</string>
+
     <!-- Peer-lost dialog -->
     <string name="peer_lost_title">Verbindung unterbrochen</string>
     <string name="peer_lost_message">Die Verbindung zum anderen Gerät wurde unterbrochen. Du wurdest zum Startbildschirm zurückgeleitet.</string>
