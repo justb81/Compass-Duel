@@ -144,38 +144,10 @@ jobs:
             echo "::notice::GOOGLE_PLAY_SERVICE_ACCOUNT_JSON secret not set — skipping Play Store upload."
           fi
 
-      # -- Resolve an NDK for native debug symbols ------------------------
-      # The app has no native sources, but the AAB bundles .so files from
-      # dependencies (e.g. play-services). AGP needs an NDK (objcopy) to extract
-      # their debug symbols and embed them in the bundle so Play Console can
-      # symbolicate native crashes. GitHub runners ship an NDK; use the newest
-      # installed one and hand its version to Gradle via ANDROID_NDK_VERSION
-      # (read by the convention plugin). Falls back to installing a pinned NDK if
-      # the runner image ever stops shipping one.
-      - name: Resolve NDK for native debug symbols
-        if: steps.keystore.outputs.available == 'true'
-        run: |
-          set -euo pipefail
-          sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-          ndk_dir="${ANDROID_NDK_LATEST_HOME:-}"
-          if [ -z "$ndk_dir" ] || [ ! -d "$ndk_dir" ]; then
-            ndk_dir="$(ls -d "$sdk"/ndk/* 2>/dev/null | sort -V | tail -n1 || true)"
-          fi
-          if [ -z "$ndk_dir" ] || [ ! -d "$ndk_dir" ]; then
-            PINNED_NDK="27.0.12077973"
-            echo "::notice::No pre-installed NDK found — installing ndk;$PINNED_NDK."
-            yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" "ndk;$PINNED_NDK" >/dev/null
-            ndk_dir="$sdk/ndk/$PINNED_NDK"
-          fi
-          ndk_ver="$(basename "$ndk_dir")"
-          echo "Using NDK $ndk_ver at $ndk_dir"
-          echo "ANDROID_NDK_VERSION=$ndk_ver" >> "$GITHUB_ENV"
-
       # -- Signed release builds (APK + AAB) ------------------------------
       # Signing credentials are intentionally absent from env here — they were
       # written to ~/.gradle/gradle.properties above and Gradle reads them as
       # project properties, keeping them out of the environment and any logs.
-      # ANDROID_NDK_VERSION (set above) lets AGP extract native debug symbols.
       - name: Build signed release (APK + AAB)
         if: steps.keystore.outputs.available == 'true'
         env:
@@ -196,12 +168,6 @@ jobs:
             [ -f "$aab" ] && cp "$aab" "release-assets/compassduel-${VERSION}-release.aab"
           done
 
-          # Native debug symbols (AGP emits these when debugSymbolLevel is set).
-          SYMS="app/build/outputs/native-debug-symbols/release/native-debug-symbols.zip"
-          if [ -f "$SYMS" ]; then
-            cp "$SYMS" "release-assets/compassduel-${VERSION}-native-debug-symbols.zip"
-          fi
-
           # ProGuard/R8 mapping file — Play Console needs it to de-obfuscate
           # release stack traces.
           MAPPING="app/build/outputs/mapping/release/mapping.txt"
@@ -213,11 +179,11 @@ jobs:
 
       # -- Stage artefacts for the Play upload ----------------------------
       # Gradle Play Publisher's artifactDir mode uploads every AAB it finds in
-      # the given directory. For App Bundles the R8 deobfuscation mapping and the
-      # native debug symbols are embedded inside the .aab itself by AGP (the
-      # latter via debugSymbolLevel on the release build type) and travel to Play
-      # with the bundle — GPP does not upload a sibling mapping/symbols file for
-      # AABs. So only the .aab needs staging here.
+      # the given directory. For App Bundles the R8 deobfuscation mapping is
+      # embedded inside the .aab itself by AGP and travels to Play with the
+      # bundle — GPP does not upload a sibling mapping file for AABs. The app
+      # ships no native code (the one native lib is excluded in build.gradle.kts),
+      # so there are no debug symbols to attach. Only the .aab needs staging here.
       - name: Stage Play artifacts
         if: steps.keystore.outputs.available == 'true'
         run: |
@@ -239,7 +205,7 @@ jobs:
           # were produced (e.g. signing secrets unset) rather than failing on a
           # non-existent file under `set -e`.
           shopt -s nullglob
-          for file in release-assets/*.apk release-assets/*.aab release-assets/*-native-debug-symbols.zip release-assets/*-mapping.txt; do
+          for file in release-assets/*.apk release-assets/*.aab release-assets/*-mapping.txt; do
             gh release upload "${TAG}" "$file" --clobber
           done
 
@@ -327,7 +293,6 @@ jobs:
           path: |
             release-assets/*.apk
             release-assets/*.aab
-            release-assets/*-native-debug-symbols.zip
             release-assets/*-mapping.txt
 
       # -- Clean up sensitive files on disk ----------------------------------

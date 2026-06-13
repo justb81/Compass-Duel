@@ -27,6 +27,20 @@ android {
         versionName = providers.environmentVariable("VERSION_NAME")
             .orElse("0.4.1").get() // x-release-please-version
     }
+
+    // Drop the only native library in the bundle. androidx.graphics:graphics-path
+    // (pulled in by Compose) ships libandroidx.graphics.path.so purely as a
+    // pre-API-34 fast path; on API 34+ it uses the platform
+    // android.graphics.PathIterator and never loads the .so. minSdk is 35, so the
+    // library is dead weight — excluding it removes the app's only native code,
+    // which is what made Play Console flag the bundle as "contains native code,
+    // no debug symbols uploaded". The symbols can't be generated anyway (the
+    // prebuilt .so is stripped), so removing it is the correct fix.
+    packaging {
+        jniLibs {
+            excludes += "**/libandroidx.graphics.path.so"
+        }
+    }
 }
 
 dependencies {

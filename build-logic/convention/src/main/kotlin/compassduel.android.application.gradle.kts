@@ -22,15 +22,6 @@ val keystoreFile = providers.environmentVariable("KEYSTORE_FILE").orNull?.takeIf
 android {
     compileSdk = 37
 
-    // The app has no native sources, but AGP still needs an NDK at release time
-    // to run objcopy and extract native debug symbols from the .so files pulled
-    // in by dependencies (e.g. play-services). CI installs an NDK and exports its
-    // version as ANDROID_NDK_VERSION; when unset (local debug builds) ndkVersion
-    // stays unset and AGP simply skips symbol extraction — no NDK required.
-    providers.environmentVariable("ANDROID_NDK_VERSION").orNull
-        ?.takeIf { it.isNotBlank() }
-        ?.let { ndkVersion = it }
-
     if (keystoreFile != null) {
         signingConfigs {
             create("release") {
@@ -57,16 +48,6 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Embed native debug symbols in the AAB so Google Play Console can
-            // symbolicate crashes/ANRs from the native libraries pulled in by
-            // dependencies (e.g. play-services-nearby). This only takes effect
-            // when an NDK is available (see ndkVersion above) — AGP needs it to
-            // extract the symbols; otherwise the task silently produces nothing.
-            // FULL keeps file names + line numbers; the symbol footprint is well
-            // under the 300 MB Play limit for this app.
-            ndk {
-                debugSymbolLevel = "FULL"
-            }
             signingConfig = if (keystoreFile != null) {
                 signingConfigs.getByName("release")
             } else {
