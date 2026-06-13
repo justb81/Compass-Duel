@@ -121,9 +121,10 @@ class KidsRuleSet : ModeRuleSet {
         val thrownStats = accumulateStat(stats, action.playerId) { it.copy(sparklesThrown = it.sparklesThrown + 1) }
         val actorSetup = setup.firstOrNull { it.id == action.playerId }
         val target = actorSetup?.let { selectTarget(action.playerId, action.aimDegrees, playersWithCooldown, it) }
-        if (actorSetup == null || target == null) return KidsTickState(playersWithCooldown, thrownStats)
-
-        val bearing = actorSetup.bearings[target.id] ?: return KidsTickState(playersWithCooldown, thrownStats)
+        val bearing = target?.let { actorSetup?.bearings?.get(it.id) }
+        if (actorSetup == null || target == null || bearing == null) {
+            return KidsTickState(playersWithCooldown, thrownStats)
+        }
         val result = evaluateCatch(
             aimAzimuth = action.aimDegrees,
             bearingToTarget = bearing,
