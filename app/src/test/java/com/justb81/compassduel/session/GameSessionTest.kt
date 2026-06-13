@@ -161,6 +161,9 @@ private class ControllableEngine(
     override fun roundOutcome(): RoundOutcome = stubbedOutcome
 }
 
+// Aggregates host/client lobby, security trust-boundary and round-lifecycle scenarios for
+// GameSession; the shared FakeTransport/clock/engine harness keeps these in one suite.
+@Suppress("LargeClass")
 class GameSessionTest {
 
     private val testDispatcher = StandardTestDispatcher()

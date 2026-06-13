@@ -20,7 +20,6 @@ import com.justb81.compassduel.net.protocol.GameSnapshot
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.net.protocol.NetMessage
 import com.justb81.compassduel.net.protocol.PlayerAction
-import com.justb81.compassduel.net.protocol.RoundPhase
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -168,12 +167,14 @@ class GameSession @Inject constructor(
     private var snapshotJob: Job? = null
     private var messageJob: Job? = null
     private var connectionJob: Job? = null
+
     /**
      * Tracks the coroutine that awaits [GameEngine.roundOverSignal] so it can be
      * cancelled on reset/rematch, preventing a dangling await on a never-completing
      * deferred when the engine is stopped mid-round (e.g. disconnect, #66).
      */
     private var roundOverWaitJob: Job? = null
+
     /**
      * Tracks the coroutine launched by [computeAndBroadcastRoundEnd] that waits for
      * [ROUND_END_DELAY_MILLIS] (and possibly [NEXT_ROUND_DELAY_MILLIS]) before advancing
@@ -458,61 +459,69 @@ class GameSession @Inject constructor(
             is NetMessage.StateBroadcast,
             is NetMessage.RoundEnd,
             is NetMessage.Rematch,
-            -> return
-            is NetMessage.ClientHello -> {
-                // Truncate name to prevent unbounded data reaching game logic.
-                val name = message.playerName.take(MAX_PLAYER_NAME_LENGTH)
-                // The compound size-check → id-allocation → add must be atomic under lobbyLock
-                // so concurrent ClientHello messages cannot both pass the size guard (#61).
-                val added = synchronized(lobbyLock) {
-                    // Cap lobby size: reject late joiners.
-                    if (lobbyPlayers.size >= MAX_PLAYERS) return@synchronized false
-                    // Allocate lowest unused id (ids start at HOST_PLAYER_ID + 1 = 2).
-                    val newId = (HOST_PLAYER_ID + 1..MAX_PLAYERS + 1).first { candidate ->
-                        lobbyPlayers.none { it.id == candidate }
-                    }
-                    endpointToPlayerId[endpointId] = newId
-                    lobbyPlayers.add(LobbyPlayer(id = newId, name = name))
-                    true
-                }
-                if (added) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+            -> Unit
+            is NetMessage.ClientHello -> handleClientHello(endpointId, message)
+            is NetMessage.SeatChosen -> handleSeatChosen(endpointId, message)
+            is NetMessage.CharacterChosen -> handleCharacterChosen(endpointId, message)
+            is NetMessage.PlayerInput -> handlePlayerInput(endpointId, message)
+        }
+    }
+
+    private fun handleClientHello(endpointId: String, message: NetMessage.ClientHello) {
+        // Truncate name to prevent unbounded data reaching game logic.
+        val name = message.playerName.take(MAX_PLAYER_NAME_LENGTH)
+        // The compound size-check → id-allocation → add must be atomic under lobbyLock
+        // so concurrent ClientHello messages cannot both pass the size guard (#61).
+        val added = synchronized(lobbyLock) {
+            // Cap lobby size: reject late joiners.
+            if (lobbyPlayers.size >= MAX_PLAYERS) return@synchronized false
+            // Allocate lowest unused id (ids start at HOST_PLAYER_ID + 1 = 2).
+            val newId = (HOST_PLAYER_ID + 1..MAX_PLAYERS + 1).first { candidate ->
+                lobbyPlayers.none { it.id == candidate }
             }
-            is NetMessage.SeatChosen -> {
-                // Reject out-of-range cell indices.
-                if (message.cell !in 0..8) return
-                val playerId = endpointToPlayerId[endpointId] ?: return
-                // The duplicate-seat check and the update must be atomic under lobbyLock
-                // so two clients cannot concurrently claim the same seat (#61).
-                val updated = synchronized(lobbyLock) {
-                    // Reject already-taken seats.
-                    if (lobbyPlayers.any { it.seatCell == message.cell }) return@synchronized false
-                    updatePlayerLocked(playerId) { it.copy(seatCell = message.cell) }
-                    true
-                }
-                if (updated) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
-            }
-            is NetMessage.CharacterChosen -> {
-                val playerId = endpointToPlayerId[endpointId] ?: return
-                synchronized(lobbyLock) {
-                    updatePlayerLocked(playerId) { p ->
-                        p.copy(
-                            element = message.element,
-                            spriteId = message.spriteId,
-                            ready = message.element != null || message.spriteId != null,
-                        )
-                    }
-                }
-                broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
-            }
-            is NetMessage.PlayerInput -> {
-                // Reject inputs from endpoints not registered in the lobby.
-                val trustedId = endpointToPlayerId[endpointId] ?: return
-                // Reject non-finite sensor values before they reach game logic.
-                if (!message.aimDegrees.isFinite()) return
-                if (!message.pitchDegrees.isFinite()) return
-                feedInputToEngine(message, trustedId)
+            endpointToPlayerId[endpointId] = newId
+            lobbyPlayers.add(LobbyPlayer(id = newId, name = name))
+            true
+        }
+        if (added) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    private fun handleSeatChosen(endpointId: String, message: NetMessage.SeatChosen) {
+        // Reject out-of-range cell indices.
+        if (message.cell !in 0..8) return
+        val playerId = endpointToPlayerId[endpointId] ?: return
+        // The duplicate-seat check and the update must be atomic under lobbyLock
+        // so two clients cannot concurrently claim the same seat (#61).
+        val updated = synchronized(lobbyLock) {
+            // Reject already-taken seats.
+            if (lobbyPlayers.any { it.seatCell == message.cell }) return@synchronized false
+            updatePlayerLocked(playerId) { it.copy(seatCell = message.cell) }
+            true
+        }
+        if (updated) broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    private fun handleCharacterChosen(endpointId: String, message: NetMessage.CharacterChosen) {
+        val playerId = endpointToPlayerId[endpointId] ?: return
+        synchronized(lobbyLock) {
+            updatePlayerLocked(playerId) { p ->
+                p.copy(
+                    element = message.element,
+                    spriteId = message.spriteId,
+                    ready = message.element != null || message.spriteId != null,
+                )
             }
         }
+        broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    private fun handlePlayerInput(endpointId: String, message: NetMessage.PlayerInput) {
+        // Reject inputs from endpoints not registered in the lobby.
+        val trustedId = endpointToPlayerId[endpointId] ?: return
+        // Reject non-finite sensor values before they reach game logic.
+        if (!message.aimDegrees.isFinite()) return
+        if (!message.pitchDegrees.isFinite()) return
+        feedInputToEngine(message, trustedId)
     }
 
     private fun handleClientIncoming(endpointId: String, message: NetMessage) {

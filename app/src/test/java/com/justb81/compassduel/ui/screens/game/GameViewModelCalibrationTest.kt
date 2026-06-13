@@ -5,7 +5,6 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertInstanceOf
 import org.junit.jupiter.api.Test
 
-
 /**
  * Unit tests for [GameViewModel.resolveCalibration] — the pure helper that decides
  * which [AimCalibration] to use at the start of the PLAYING phase, or whether to

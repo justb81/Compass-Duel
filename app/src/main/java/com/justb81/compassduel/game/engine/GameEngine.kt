@@ -291,6 +291,7 @@ open class GameEngine(
     // from a different coroutine (the session round-end path). @Volatile provides the required
     // happens-before guarantee for single-write/single-read cross-thread visibility (#61).
     @Volatile private var engineState: EngineState? = null
+
     @Volatile private var currentPhase: RoundPhase = RoundPhase.COUNTDOWN
 
     private var setup: List<EnginePlayerSetup> = emptyList()
