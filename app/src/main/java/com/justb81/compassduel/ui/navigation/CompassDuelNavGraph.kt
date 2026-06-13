@@ -5,6 +5,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -81,6 +82,7 @@ fun CompassDuelNavGraph(navController: NavHostController) {
     var lastCrash by rememberSaveable { mutableStateOf(CrashReporter.consumeLastCrash(context)) }
 
     var showPeerLostDialog by rememberSaveable { mutableStateOf(false) }
+    var showReconnecting by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(appViewModel) {
         appViewModel.sessionEvents.collect { event ->
@@ -115,7 +117,12 @@ fun CompassDuelNavGraph(navController: NavHostController) {
                     // lobby before the host resumes. Match score is preserved.
                     navController.popBackStack<GameRoute>(inclusive = true)
                 }
-                SessionEvent.PeerLost -> showPeerLostDialog = true
+                SessionEvent.PeerReconnecting -> showReconnecting = true
+                SessionEvent.PeerReconnected -> showReconnecting = false
+                SessionEvent.PeerLost -> {
+                    showReconnecting = false
+                    showPeerLostDialog = true
+                }
             }
         }
     }
@@ -125,6 +132,10 @@ fun CompassDuelNavGraph(navController: NavHostController) {
             details = crashText,
             onDismiss = { lastCrash = null },
         )
+    }
+
+    if (showReconnecting && !showPeerLostDialog) {
+        ReconnectingDialog()
     }
 
     if (showPeerLostDialog) {
@@ -198,6 +209,19 @@ private fun CrashReportDialog(details: String, onDismiss: () -> Unit) {
 }
 
 private const val CRASH_DIALOG_MAX_HEIGHT_DP = 320
+
+@Composable
+private fun ReconnectingDialog() {
+    // Non-dismissible: the empty onDismissRequest/confirmButton keep the overlay up until the
+    // session resolves the reconnect (PeerReconnected → hide, PeerLost → terminal dialog).
+    AlertDialog(
+        onDismissRequest = {},
+        icon = { CircularProgressIndicator() },
+        title = { Text(text = stringResource(R.string.reconnecting_title)) },
+        text = { Text(text = stringResource(R.string.reconnecting_message)) },
+        confirmButton = {},
+    )
+}
 
 @Composable
 private fun PeerLostDialog(onDismiss: () -> Unit) {

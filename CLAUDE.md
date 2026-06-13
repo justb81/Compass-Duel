@@ -19,7 +19,14 @@ vehicle rotation via `CommonModeEstimator`; a player who leaves their seat
 (`MovementDetector`/`MovementPolicy`) forfeits the round and must re-greet. All
 networking runs offline over the **Google Nearby Connections API** (P2P_STAR topology:
 one Host + N Clients). The Host is authoritative for hit detection — clients never
-decide hits, which prevents cheating. See `docs/game-spec.md` for the full spec.
+decide hits, which prevents cheating. Control messages (`RoundStart`/`RoundEnd`/`LobbyState`/
+`Rematch`/`Regreet` and the lobby-setup client→host messages) are delivered reliably via
+`ReliableMessageTransport` (sequenced envelope + ack + retransmit + dedup); only the
+high-frequency `StateBroadcast` stream stays best-effort. A single mid-round dropout no
+longer aborts a viable round — the Host holds the seat through a reconnect grace window,
+then forfeits the player and continues if `MIN_PLAYERS` remain (else ends the match), and the
+Client retries a lost Host link before giving up. Host *migration* is still out of scope. See
+`docs/game-spec.md` for the full spec.
 
 A child-friendly variant, **Kids Mode ("Star Catchers")**, replaces combat
 with magic tag: no HP/damage/elimination, stars only go up, every player gets
@@ -41,7 +48,8 @@ Compass-Duel/
 │       │   ├── standard/       Standard Mode domain — DuelPlayer, AttackResult, MatchScore
 │       │   ├── gesture/        Pure classifiers — GestureClassifier (fire/shield), BowDetector (greeting)
 │       │   └── engine/         Host-authoritative game engine — GameEngine, ModeRuleSet, rule sets
-│       ├── net/                NearbyConnectionManager (MessageTransport impl)
+│       ├── net/                NearbyConnectionManager (MessageTransport impl) + ReliableMessageTransport
+│       │                       (decorator: ack/retransmit/dedup for control messages)
 │       │   └── protocol/       Nearby payload schema — NetMessage sealed hierarchy, MessageCodec
 │       │                       (canonical source for all on-wire message types)
 │       ├── sensor/             OrientationSensor, ShakeDetector, MovementDetector, InputPipeline

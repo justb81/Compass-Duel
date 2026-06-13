@@ -230,6 +230,8 @@ class HomeViewModelTest {
 
         override fun send(endpointId: String, message: NetMessage) = Unit
         override fun broadcast(message: NetMessage) = Unit
+        override fun sendReliable(endpointId: String, message: NetMessage) = Unit
+        override fun broadcastReliable(message: NetMessage) = Unit
         override fun stopAll() = Unit
 
         companion object {
