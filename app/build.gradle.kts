@@ -28,17 +28,24 @@ android {
             .orElse("0.7.0").get() // x-release-please-version
     }
 
-    // Drop the only native library in the bundle. androidx.graphics:graphics-path
-    // (pulled in by Compose) ships libandroidx.graphics.path.so purely as a
-    // pre-API-34 fast path; on API 34+ it uses the platform
-    // android.graphics.PathIterator and never loads the .so. minSdk is 35, so the
-    // library is dead weight — excluding it removes the app's only native code,
-    // which is what made Play Console flag the bundle as "contains native code,
-    // no debug symbols uploaded". The symbols can't be generated anyway (the
-    // prebuilt .so is stripped), so removing it is the correct fix.
+    // Drop the unused native libraries from the bundle. Each is dead weight on
+    // this app's configuration, and shipping any of them makes Play Console flag
+    // the bundle as "contains native code, no debug symbols uploaded". The
+    // symbols can't be generated anyway (the prebuilt .so files are stripped), so
+    // excluding them is the correct fix. Do NOT re-add ndk.debugSymbolLevel.
     packaging {
         jniLibs {
+            // androidx.graphics:graphics-path (pulled in by Compose) ships
+            // libandroidx.graphics.path.so purely as a pre-API-34 fast path; on
+            // API 34+ it uses the platform android.graphics.PathIterator and
+            // never loads the .so. minSdk is 35, so it is never loaded.
             excludes += "**/libandroidx.graphics.path.so"
+            // androidx.datastore:datastore-core ships libdatastore_shared_counter.so
+            // for its multi-process InterProcessCoordinator. The app uses a
+            // single-process Preferences DataStore (see
+            // AppModule.userPreferencesDataStore), which uses the pure-JVM
+            // SingleProcessCoordinator, so the native counter is never loaded.
+            excludes += "**/libdatastore_shared_counter.so"
         }
     }
 }

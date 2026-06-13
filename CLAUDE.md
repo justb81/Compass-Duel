@@ -213,13 +213,21 @@ check them before pushing to save a red-CI round-trip:
 - Merging the release-please PR tags a release and triggers `release.yml`:
   signed APK + AAB → GitHub Release (with the R8 mapping) and the Play Store
   **internal** track via Gradle Play Publisher.
-- The app ships **no native code**. Its only transitive `.so`
-  (`libandroidx.graphics.path.so`, a pre-API-34 fast path from
-  `androidx.graphics:graphics-path`) is excluded via `packaging.jniLibs` in
-  `app/build.gradle.kts` — on minSdk 35 the platform `PathIterator` is used and
-  the lib is never loaded. Excluding it stops Play Console flagging the bundle
-  for missing native debug symbols (which can't be generated for a prebuilt
-  stripped lib anyway). Do not re-add `ndk.debugSymbolLevel` / NDK install steps.
+- The app ships **no native code**. Its two transitive `.so` files are excluded
+  via `packaging.jniLibs` in `app/build.gradle.kts` because both are dead weight
+  on this app's configuration:
+  - `libandroidx.graphics.path.so` (a pre-API-34 fast path from
+    `androidx.graphics:graphics-path`, pulled in by Compose) — on minSdk 35 the
+    platform `PathIterator` is used and the lib is never loaded.
+  - `libdatastore_shared_counter.so` (from `androidx.datastore:datastore-core`) —
+    used only by DataStore's multi-process `InterProcessCoordinator`; the app
+    uses a single-process Preferences DataStore (`SingleProcessCoordinator`,
+    pure JVM), so the native counter is never loaded.
+
+  Excluding them stops Play Console flagging the bundle for missing native debug
+  symbols (which can't be generated for prebuilt stripped libs anyway). When
+  adding a dependency that ships its own `.so`, exclude it here too. Do not
+  re-add `ndk.debugSymbolLevel` / NDK install steps.
 
 ### Required CI secrets
 
