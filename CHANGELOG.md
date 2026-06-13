@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.2](https://github.com/justb81/Compass-Duel/compare/v0.3.1...v0.3.2) (2026-06-13)
+
+
+### Bug Fixes
+
+* **build:** embed native debug symbols in release AAB for Play Console ([#20](https://github.com/justb81/Compass-Duel/issues/20)) ([23e3263](https://github.com/justb81/Compass-Duel/commit/23e32634561d261a231dc8b2de0930c84f32ce80))
+
 ## [0.3.1](https://github.com/justb81/Compass-Duel/compare/v0.3.0...v0.3.1) (2026-06-13)
 
 
