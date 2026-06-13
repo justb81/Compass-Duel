@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.7.0](https://github.com/justb81/Compass-Duel/compare/v0.6.0...v0.7.0) (2026-06-13)
+
+
+### Features
+
+* **home:** merge home and lobby into a discovery-first entry screen ([#90](https://github.com/justb81/Compass-Duel/issues/90)) ([475e692](https://github.com/justb81/Compass-Duel/commit/475e6923ae993e915bc622406484d13b7bc4fd5a))
+* **lobby:** add live visual and haptic feedback to the bow-to-greet gesture ([#87](https://github.com/justb81/Compass-Duel/issues/87)) ([8e72652](https://github.com/justb81/Compass-Duel/commit/8e72652758ab75ea0b536e7f61c4c3c432bbbd97))
+* selectable persisted theme (System/Light/Dark) and remembered player name ([#91](https://github.com/justb81/Compass-Duel/issues/91)) ([5bdc1ad](https://github.com/justb81/Compass-Duel/commit/5bdc1ad698fefd4bd7db5ded657797e208586683))
+
 ## [0.6.0](https://github.com/justb81/Compass-Duel/compare/v0.5.1...v0.6.0) (2026-06-13)
 
 
