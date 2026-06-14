@@ -8,6 +8,7 @@ import com.justb81.compassduel.game.engine.ModeRuleSet
 import com.justb81.compassduel.game.engine.RoundOutcome
 import com.justb81.compassduel.game.kids.KidsAward
 import com.justb81.compassduel.game.kids.KidsRoundStats
+import com.justb81.compassduel.net.AdvertisedLobby
 import com.justb81.compassduel.net.ConnectionEvent
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.MessageTransport
@@ -95,10 +96,16 @@ private class FakeTransport : MessageTransport {
     var allStopped: Boolean = false
     override var acceptNewConnections: Boolean = true
 
+    /** The most recent endpoint name passed to [startAdvertising] (encodes mode + player count, #98). */
+    var lastAdvertisedName: String? = null
+
     /** Endpoints passed to [requestConnection], in order, for reconnect assertions. */
     val connectionRequests: MutableList<String> = mutableListOf()
 
-    override fun startAdvertising(localName: String) { advertisingStarted = true }
+    override fun startAdvertising(localName: String) {
+        advertisingStarted = true
+        lastAdvertisedName = localName
+    }
     override fun startDiscovery() { discoveryStarted = true }
     override fun stopDiscovery() { discoveryStopped = true }
     override fun requestConnection(endpointId: String, localName: String) { connectionRequests += endpointId }
@@ -282,6 +289,63 @@ class GameSessionTest {
         yield()
 
         assertEquals(GameMode.KIDS, session.lobby.value?.mode)
+    }
+
+    // ---------------------------------------------------------------------------
+    // Session configuration & discovery advertisement (#98, #101)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `hostLobby advertises an endpoint name encoding mode and player count`() = testScope.runTest {
+        val session = buildSession()
+
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        val decoded = AdvertisedLobby.decode(transport.lastAdvertisedName!!)
+        assertEquals("Alice", decoded.name)
+        assertEquals(GameMode.STANDARD, decoded.mode)
+        assertEquals(1, decoded.playerCount)
+    }
+
+    @Test
+    fun `advertised player count updates when a client joins`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        transport.emitIncoming("client-ep", NetMessage.ClientHello("Bob"))
+        yield()
+
+        assertEquals(2, AdvertisedLobby.decode(transport.lastAdvertisedName!!).playerCount)
+    }
+
+    @Test
+    fun `selected round length and best-of are broadcast in lobby state`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+
+        session.setRoundDuration(30)
+        session.setBestOf(5)
+        yield()
+
+        assertEquals(30, session.lobby.value?.roundDurationSeconds)
+        assertEquals(5, session.lobby.value?.bestOf)
+    }
+
+    @Test
+    fun `kids mode forces best-of to one regardless of selection`() = testScope.runTest {
+        val session = buildSession()
+        session.hostLobby(playerName = "Alice", mode = GameMode.STANDARD)
+        yield()
+        session.setBestOf(5)
+        yield()
+
+        session.setMode(GameMode.KIDS)
+        yield()
+
+        assertEquals(1, session.lobby.value?.bestOf)
     }
 
     // ---------------------------------------------------------------------------

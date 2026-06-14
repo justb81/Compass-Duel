@@ -3,6 +3,7 @@ package com.justb81.compassduel.net.protocol
 import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.game.kids.KidsAward
 import com.justb81.compassduel.game.kids.KidsRoundStats
+import com.justb81.compassduel.game.standard.StandardRules
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -10,13 +11,16 @@ import kotlinx.serialization.Serializable
 // Supporting types
 // ---------------------------------------------------------------------------
 
+/** Default match series length (best-of-3) used when the host has not changed it. */
+const val DEFAULT_BEST_OF = 3
+
 /** The game mode chosen by the host in the lobby. */
 @Serializable
 enum class GameMode {
-    /** Standard "Elemental Duel" — elements, HP, attack/shield, best-of-3. */
+    /** "Elemental Duel" — elements, HP, attack/shield, host-configurable round length and best-of. */
     STANDARD,
 
-    /** Kids Mode "Star Catchers" — sparkles, stars, magic bubble, awards. */
+    /** Kids Mode "Star Catchers" — sparkles, stars, magic bubble, awards; single round. */
     KIDS,
 }
 
@@ -274,6 +278,8 @@ sealed interface NetMessage {
      * @param yourPlayerId The recipient's own player id (assigned by the host).
      * @param yourBearings The recipient's own captured bearings (`targetId → degrees`),
      *   so the client can render opponent dots on its compass ring.
+     * @param roundDurationSeconds The host-selected active-phase length for each round (30/60/90).
+     * @param bestOf The host-selected series length (1/3/5). Always 1 in Kids Mode.
      */
     @Serializable
     @SerialName("LobbyState")
@@ -282,6 +288,8 @@ sealed interface NetMessage {
         val players: List<LobbyPlayer>,
         val yourPlayerId: Int,
         val yourBearings: Map<Int, Float> = emptyMap(),
+        val roundDurationSeconds: Int = StandardRules.ROUND_DURATION_SECONDS,
+        val bestOf: Int = DEFAULT_BEST_OF,
     ) : NetMessage
 
     /**

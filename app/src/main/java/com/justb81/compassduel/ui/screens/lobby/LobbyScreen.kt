@@ -1,5 +1,6 @@
 package com.justb81.compassduel.ui.screens.lobby
 
+import androidx.annotation.StringRes
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -69,6 +70,16 @@ private val PASTEL_COMET = Color(0xFF80DEEA)
 private val SPRITE_EMOJIS = listOf("⭐", "🌙", "☀️", "☄️")
 private val SPRITE_PASTEL_COLORS = listOf(PASTEL_STAR, PASTEL_MOON, PASTEL_SUN, PASTEL_COMET)
 private const val SPRITE_COUNT = 4
+
+// Host-selectable round lengths (seconds) and series lengths (best-of). See issue #101.
+private const val ROUND_LENGTH_SHORT = 30
+private const val ROUND_LENGTH_MEDIUM = 60
+private const val ROUND_LENGTH_LONG = 90
+private val ROUND_LENGTH_OPTIONS = listOf(ROUND_LENGTH_SHORT, ROUND_LENGTH_MEDIUM, ROUND_LENGTH_LONG)
+private const val BEST_OF_ONE = 1
+private const val BEST_OF_THREE = 3
+private const val BEST_OF_FIVE = 5
+private val BEST_OF_OPTIONS = listOf(BEST_OF_ONE, BEST_OF_THREE, BEST_OF_FIVE)
 
 /**
  * Lobby screen: seat selection, character/sprite picking and (host only) game start.
@@ -153,6 +164,8 @@ fun LobbyScreen(
                     bowFeedback = bowFeedback,
                     isHost = isHost,
                     onSetMode = viewModel::setMode,
+                    onSetRoundDuration = viewModel::setRoundDuration,
+                    onSetBestOf = viewModel::setBestOf,
                     onArmBow = viewModel::armBow,
                     onCancelBow = viewModel::cancelBow,
                     onChooseElement = viewModel::chooseElement,
@@ -196,6 +209,8 @@ private fun LobbyContent(
     bowFeedback: BowFeedback?,
     isHost: Boolean,
     onSetMode: (GameMode) -> Unit,
+    onSetRoundDuration: (Int) -> Unit,
+    onSetBestOf: (Int) -> Unit,
     onArmBow: (Int) -> Unit,
     onCancelBow: () -> Unit,
     onChooseElement: (Element) -> Unit,
@@ -235,6 +250,16 @@ private fun LobbyContent(
                 modifier = Modifier.fillMaxWidth(),
             )
         }
+
+        // ---- Session length (host configures; clients see the choice) ----
+        SessionLengthSection(
+            mode = uiState.mode,
+            roundDurationSeconds = uiState.roundDurationSeconds,
+            bestOf = uiState.bestOf,
+            isHost = isHost,
+            onSetRoundDuration = onSetRoundDuration,
+            onSetBestOf = onSetBestOf,
+        )
 
         // ---- Greeting handshake ----
         SectionHeader(text = stringResource(R.string.lobby_greet_header))
@@ -435,6 +460,110 @@ private fun ModeSelectorRow(
             Text(text = stringResource(R.string.home_mode_kids))
         }
     }
+}
+
+/**
+ * Round-length and best-of (series) configuration. The host gets two segmented selectors; in
+ * Kids Mode the best-of 3/5 options are disabled and 1 is the only choice (single round). Clients
+ * see the host's choice as a read-only summary.
+ */
+@Composable
+private fun SessionLengthSection(
+    mode: GameMode,
+    roundDurationSeconds: Int,
+    bestOf: Int,
+    isHost: Boolean,
+    onSetRoundDuration: (Int) -> Unit,
+    onSetBestOf: (Int) -> Unit,
+) {
+    SectionHeader(text = stringResource(R.string.lobby_round_length_label))
+    if (isHost) {
+        RoundLengthSelectorRow(
+            mode = mode,
+            selectedSeconds = roundDurationSeconds,
+            onSelected = onSetRoundDuration,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        SectionHeader(text = stringResource(R.string.lobby_best_of_label))
+        BestOfSelectorRow(
+            mode = mode,
+            selectedBestOf = bestOf,
+            onSelected = onSetBestOf,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    } else {
+        Text(
+            text = stringResource(
+                R.string.lobby_config_summary,
+                stringResource(roundLengthLabelRes(mode, roundDurationSeconds)),
+                stringResource(bestOfLabelRes(mode, bestOf)),
+            ),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+@Composable
+private fun RoundLengthSelectorRow(
+    mode: GameMode,
+    selectedSeconds: Int,
+    onSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        ROUND_LENGTH_OPTIONS.forEachIndexed { index, seconds ->
+            SegmentedButton(
+                selected = selectedSeconds == seconds,
+                onClick = { onSelected(seconds) },
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = ROUND_LENGTH_OPTIONS.size),
+            ) {
+                Text(text = stringResource(roundLengthLabelRes(mode, seconds)))
+            }
+        }
+    }
+}
+
+@Composable
+private fun BestOfSelectorRow(
+    mode: GameMode,
+    selectedBestOf: Int,
+    onSelected: (Int) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    SingleChoiceSegmentedButtonRow(modifier = modifier) {
+        BEST_OF_OPTIONS.forEachIndexed { index, bestOf ->
+            SegmentedButton(
+                selected = selectedBestOf == bestOf,
+                onClick = { onSelected(bestOf) },
+                enabled = mode != GameMode.KIDS || bestOf == 1,
+                shape = SegmentedButtonDefaults.itemShape(index = index, count = BEST_OF_OPTIONS.size),
+            ) {
+                Text(text = stringResource(bestOfLabelRes(mode, bestOf)))
+            }
+        }
+    }
+}
+
+@StringRes
+private fun roundLengthLabelRes(mode: GameMode, seconds: Int): Int = when (mode) {
+    GameMode.STANDARD -> when (seconds) {
+        ROUND_LENGTH_SHORT -> R.string.round_length_standard_30
+        ROUND_LENGTH_MEDIUM -> R.string.round_length_standard_60
+        else -> R.string.round_length_standard_90
+    }
+    GameMode.KIDS -> when (seconds) {
+        ROUND_LENGTH_SHORT -> R.string.round_length_kids_30
+        ROUND_LENGTH_MEDIUM -> R.string.round_length_kids_60
+        else -> R.string.round_length_kids_90
+    }
+}
+
+@StringRes
+private fun bestOfLabelRes(mode: GameMode, bestOf: Int): Int = when (bestOf) {
+    BEST_OF_ONE -> if (mode == GameMode.KIDS) R.string.best_of_kids_1 else R.string.best_of_standard_1
+    BEST_OF_THREE -> R.string.best_of_standard_3
+    else -> R.string.best_of_standard_5
 }
 
 @Composable

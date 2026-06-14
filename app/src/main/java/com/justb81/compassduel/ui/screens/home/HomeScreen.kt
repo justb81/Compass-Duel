@@ -51,6 +51,9 @@ private val PROGRESS_INDICATOR_SIZE_DP = 24.dp
 private const val MODE_ICON_STANDARD = "⚔️"
 private const val MODE_ICON_KIDS = "🌟"
 
+/** Maximum players per lobby, shown as the denominator in the discovery subtitle ("X/4"). */
+private const val MAX_PLAYERS = 4
+
 /**
  * Home screen: the combined entry point. Enter a name and (for hosting) pick a mode, then
  * either join one of the nearby games discovered on launch or create your own.
@@ -243,6 +246,10 @@ private fun NearbyGamesSection(
     }
 }
 
+/**
+ * A single discovered host. Shows the mode icon, the host name, and — when the advertisement
+ * carries it — a "<mode> · X/4 players" subtitle (#98), with a Join action on the trailing edge.
+ */
 @Composable
 private fun NearbyGameRow(
     endpoint: DiscoveredEndpoint,
@@ -256,8 +263,44 @@ private fun NearbyGameRow(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = ITEM_SPACING_DP, vertical = ROW_SPACING_DP),
     ) {
-        Text(text = endpoint.name)
-        Spacer(modifier = Modifier.weight(1f))
+        Text(
+            text = endpoint.mode?.let { modeIcon(it) } ?: MODE_ICON_STANDARD,
+            modifier = Modifier.padding(end = ROW_SPACING_DP),
+        )
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .align(Alignment.CenterVertically),
+        ) {
+            Text(
+                text = endpoint.name,
+                style = MaterialTheme.typography.titleMedium,
+            )
+            endpoint.mode?.let { mode ->
+                Text(
+                    text = stringResource(
+                        R.string.home_nearby_game_subtitle,
+                        stringResource(modeLabelRes(mode)),
+                        endpoint.playerCount,
+                        MAX_PLAYERS,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
         Text(text = stringResource(R.string.home_join_button))
     }
+}
+
+/** Emoji marker for [mode], reused from the mode selector. */
+private fun modeIcon(mode: GameMode): String = when (mode) {
+    GameMode.STANDARD -> MODE_ICON_STANDARD
+    GameMode.KIDS -> MODE_ICON_KIDS
+}
+
+@StringRes
+private fun modeLabelRes(mode: GameMode): Int = when (mode) {
+    GameMode.STANDARD -> R.string.home_mode_standard
+    GameMode.KIDS -> R.string.home_mode_kids
 }

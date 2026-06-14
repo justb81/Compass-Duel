@@ -33,6 +33,12 @@ class KidsRuleSetTest {
         assertTrue(state.players.all { it.restingUntilMillis == 0L })
     }
 
+    @Test
+    fun `round length defaults to the Kids constant and honours a host override (#101)`() {
+        assertEquals(KidsRules.ROUND_DURATION_SECONDS, rules.roundDurationSeconds)
+        assertEquals(90, KidsRuleSet(roundDurationSeconds = 90).roundDurationSeconds)
+    }
+
     // ---------------------------------------------------------------------------
     // Sparkle toss — successful catch
     // ---------------------------------------------------------------------------

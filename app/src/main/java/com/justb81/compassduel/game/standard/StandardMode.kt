@@ -15,21 +15,31 @@ object StandardRules {
     /** A player starts every round with this many hit points. */
     const val MAX_HP = 100
 
-    /** A round ends automatically after this many seconds if players remain. */
+    /**
+     * Default active-phase duration in seconds. The host can pick a different round length
+     * in the lobby (see [com.justb81.compassduel.game.engine.StandardRuleSet]); this is the
+     * fallback used when none is chosen.
+     */
     const val ROUND_DURATION_SECONDS = 90
 
     /**
-     * Total shield-time budget per player per round (ms): 50 % of the round.
-     * Shielding consumes this budget; once exhausted the shield can no longer
-     * be held for the rest of the round.
+     * Total shield-time budget per player per round (ms) at the default round length: 50 % of
+     * the round. Used as the [DuelPlayer.shieldRemainingMillis] default; the rule set scales it
+     * to the chosen round length via [shieldBudgetMillis].
      */
     const val SHIELD_BUDGET_MILLIS = ROUND_DURATION_SECONDS * 1_000L / 2
 
     /** Minimum time (ms) between two consecutive attacks by the same player. */
     const val ATTACK_COOLDOWN_MILLIS = 700L
 
-    /** First player to win this many rounds wins the match. */
+    /** Default rounds a player must win to take the match (best-of-3); host-configurable. */
     const val ROUNDS_TO_WIN = 2
+
+    /**
+     * Shield-time budget (ms) for a round of [roundSeconds] seconds: always 50 % of the round,
+     * so the budget scales with the host's chosen round length.
+     */
+    fun shieldBudgetMillis(roundSeconds: Int): Long = roundSeconds * 1_000L / 2
 }
 
 /**

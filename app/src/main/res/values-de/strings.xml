@@ -10,13 +10,15 @@
 
     <!-- Home screen -->
     <string name="home_player_name_label">Dein Name</string>
-    <string name="home_mode_standard">Standard</string>
+    <string name="home_mode_standard">Elemente-Duell</string>
     <string name="home_mode_kids">Sternenfänger</string>
     <string name="home_create_game">Spiel erstellen</string>
     <string name="home_nearby_header">Spiele in der Nähe</string>
     <string name="home_searching">Suche nach Spielen in der Nähe …</string>
     <string name="home_no_games_found">Noch keine Spiele. Erstelle ein eigenes oder warte auf einen Host in der Nähe.</string>
     <string name="home_join_button">Beitreten</string>
+    <!-- Discovery card subtitle: "<Modus> · <verbunden>/<max> Spieler" -->
+    <string name="home_nearby_game_subtitle">%1$s · %2$d/%3$d Spieler</string>
     <string name="home_theme_system">System</string>
     <string name="home_theme_light">Hell</string>
     <string name="home_theme_dark">Dunkel</string>
@@ -44,6 +46,26 @@
     <string name="lobby_character_header">Charakter wählen</string>
     <string name="lobby_start_button">Spiel starten</string>
     <string name="lobby_waiting_for_host">Warte auf den Host …</string>
+
+    <!-- Lobby — Rundenlänge & Match-Länge (vom Host wählbar; #101) -->
+    <string name="lobby_round_length_label">Rundenlänge</string>
+    <string name="lobby_best_of_label">Match-Länge</string>
+    <!-- Schreibgeschützte Zusammenfassung für Clients: "<Rundenlänge> · <Match-Länge>" -->
+    <string name="lobby_config_summary">%1$s · %2$s</string>
+    <!-- Rundenlänge (Elemente-Duell): 30s / 60s / 90s -->
+    <string name="round_length_standard_30">Scharmützel</string>
+    <string name="round_length_standard_60">Duell</string>
+    <string name="round_length_standard_90">Episches Duell</string>
+    <!-- Rundenlänge (Sternenfänger): 30s / 60s / 90s -->
+    <string name="round_length_kids_30">Sternschnuppe</string>
+    <string name="round_length_kids_60">Sternenjagd</string>
+    <string name="round_length_kids_90">Galaxie-Quest</string>
+    <!-- Match-Länge / Best-of (Elemente-Duell): Best of 1 / 3 / 5 -->
+    <string name="best_of_standard_1">Sudden Death</string>
+    <string name="best_of_standard_3">Best of Three</string>
+    <string name="best_of_standard_5">Meisterschaft</string>
+    <!-- Match-Länge (Sternenfänger): nur eine Runde -->
+    <string name="best_of_kids_1">Eine Runde</string>
 
     <!-- Lobby — Validierungsfehler beim Spielstart -->
     <string name="lobby_start_error_no_lobby">Start nicht möglich — keine Lobby.</string>

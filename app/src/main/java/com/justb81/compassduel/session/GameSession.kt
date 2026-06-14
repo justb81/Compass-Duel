@@ -12,10 +12,13 @@ import com.justb81.compassduel.game.engine.ModeRuleSet
 import com.justb81.compassduel.game.engine.RoundOutcome
 import com.justb81.compassduel.game.engine.StandardRuleSet
 import com.justb81.compassduel.game.standard.MatchScore
+import com.justb81.compassduel.game.standard.StandardRules
+import com.justb81.compassduel.net.AdvertisedLobby
 import com.justb81.compassduel.net.ConnectionEvent
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.TransportError
+import com.justb81.compassduel.net.protocol.DEFAULT_BEST_OF
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.GameSnapshot
 import com.justb81.compassduel.net.protocol.LobbyPlayer
@@ -255,6 +258,13 @@ class GameSession @Inject constructor(
     private var matchScore: MatchScore = MatchScore()
     private var matchInProgress: Boolean = false
 
+    /** Host-selected round length (seconds) and series length (best-of). See [setRoundDuration]/[setBestOf]. */
+    private var selectedRoundDurationSeconds: Int = StandardRules.ROUND_DURATION_SECONDS
+    private var selectedBestOf: Int = DEFAULT_BEST_OF
+
+    /** Last endpoint name advertised by the host, so [maybeReadvertise] only re-advertises on change. */
+    private var lastAdvertisedName: String? = null
+
     // --- Disconnect / reconnect grace (#65) ---
 
     /**
@@ -301,7 +311,6 @@ class GameSession @Inject constructor(
         broadcastLobbyToAll(mode)
         startConnectionListener()
         startMessageListener()
-        transport.startAdvertising(playerName)
     }
 
     /**
@@ -311,6 +320,47 @@ class GameSession @Inject constructor(
      */
     fun setMode(mode: GameMode) {
         broadcastLobbyToAll(mode)
+    }
+
+    /**
+     * Sets the per-round active-phase length in seconds (host only; 30/60/90). Rebroadcasts the
+     * lobby so clients see the new length.
+     */
+    fun setRoundDuration(seconds: Int) {
+        selectedRoundDurationSeconds = seconds
+        broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    /**
+     * Sets the match series length (host only; best of 1/3/5). Has no effect in Kids Mode, which
+     * is always a single round. Rebroadcasts the lobby so clients see the new series length.
+     */
+    fun setBestOf(bestOf: Int) {
+        selectedBestOf = bestOf
+        broadcastLobbyToAll(_lobby.value?.mode ?: GameMode.STANDARD)
+    }
+
+    /** The effective series length for [mode]: always 1 in Kids Mode, else the host's choice. */
+    private fun effectiveBestOf(mode: GameMode): Int =
+        if (mode == GameMode.KIDS) 1 else selectedBestOf
+
+    /** Rounds a player must win for a best-of-[bestOf] series (1→1, 3→2, 5→3). */
+    private fun bestOfToRoundsToWin(bestOf: Int): Int = (bestOf + 1) / 2
+
+    /**
+     * Re-advertises this host with an endpoint name that encodes the current mode and player
+     * count (#98), but only when that encoded name actually changed — so greeting/character
+     * broadcasts cause no advertising churn while joins and mode changes refresh the discovery
+     * card. No-op when this device is not the host.
+     */
+    private fun maybeReadvertise(mode: GameMode) {
+        if (_role.value != SessionRole.HOST) return
+        val playerCount = synchronized(lobbyLock) { lobbyPlayers.size }
+        val encoded = AdvertisedLobby.encode(localPlayerName, mode, playerCount)
+        if (encoded != lastAdvertisedName) {
+            lastAdvertisedName = encoded
+            transport.startAdvertising(encoded)
+        }
     }
 
     /**
@@ -329,7 +379,7 @@ class GameSession @Inject constructor(
         if (failure != null) return failure
 
         roundIndex = 0
-        matchScore = MatchScore()
+        matchScore = MatchScore(roundsToWin = bestOfToRoundsToWin(effectiveBestOf(currentLobby.mode)))
         matchInProgress = true
         startRoundInternal(currentLobby.mode, players)
         transport.acceptNewConnections = false
@@ -904,8 +954,8 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun ruleSetFor(mode: GameMode): ModeRuleSet = when (mode) {
-        GameMode.STANDARD -> StandardRuleSet()
-        GameMode.KIDS -> KidsRuleSet()
+        GameMode.STANDARD -> StandardRuleSet(selectedRoundDurationSeconds)
+        GameMode.KIDS -> KidsRuleSet(selectedRoundDurationSeconds)
     }
 
     private fun startRoundInternal(mode: GameMode, players: List<LobbyPlayer>) {
@@ -1092,11 +1142,14 @@ class GameSession @Inject constructor(
                 )
             }
         }
+        val bestOf = effectiveBestOf(mode)
         _lobby.value = NetMessage.LobbyState(
             mode = mode,
             players = players,
             yourPlayerId = HOST_PLAYER_ID,
             yourBearings = matrix[HOST_PLAYER_ID].orEmpty(),
+            roundDurationSeconds = selectedRoundDurationSeconds,
+            bestOf = bestOf,
         )
         endpointToPlayerId.forEach { (endpointId, playerId) ->
             transport.sendReliable(
@@ -1106,9 +1159,12 @@ class GameSession @Inject constructor(
                     players = players,
                     yourPlayerId = playerId,
                     yourBearings = matrix[playerId].orEmpty(),
+                    roundDurationSeconds = selectedRoundDurationSeconds,
+                    bestOf = bestOf,
                 ),
             )
         }
+        maybeReadvertise(mode)
     }
 
     private fun hasCharacter(player: LobbyPlayer, mode: GameMode): Boolean = when (mode) {
@@ -1196,6 +1252,9 @@ class GameSession @Inject constructor(
         roundIndex = 0
         matchScore = MatchScore()
         matchInProgress = false
+        selectedRoundDurationSeconds = StandardRules.ROUND_DURATION_SECONDS
+        selectedBestOf = DEFAULT_BEST_OF
+        lastAdvertisedName = null
         transport.acceptNewConnections = true
     }
 

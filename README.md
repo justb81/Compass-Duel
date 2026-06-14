@@ -12,22 +12,22 @@ technical specification.
 
 ## Game Modes
 
-### Standard — Elemental Duel
+### Elemental Duel
 
 Players choose an element (Fire, Water, Earth, Lightning) with classic
-strength/weakness matchups. Each round is 90 seconds; players start with
-100 HP. Attacks deal elemental damage; shields fully block but are limited to a
-budget of half the round time. The last survivor wins the round. First to two round wins takes the
-match. Exact ties on the 90 s timeout are decided by highest HP; a tie on HP
-counts as a draw.
+strength/weakness matchups. Players start with 100 HP. Attacks deal elemental
+damage; shields fully block but are limited to a budget of half the round time.
+The last survivor wins the round. The host picks the round length (30 / 60 / 90 s)
+and the series length — best of one, three, or five round wins takes the match.
+Exact ties on the timeout are decided by highest HP; a tie on HP counts as a draw.
 
 ### Kids Mode — Star Catchers
 
 No HP, no elimination. Players toss sparkles at friends to earn stars; holding
 the phone flat activates a magic bubble that blocks incoming sparkles. Stars only
-go up. A round runs for a fixed time (60 s) and every player stays in until the
-end. At the end every player receives exactly one award (Star Champion, Bubble
-Hero, Busy Bee, or Super Sparkler).
+go up. A single round runs for a host-chosen time (30 / 60 / 90 s) and every player
+stays in until the end. At the end every player receives exactly one award (Star
+Champion, Bubble Hero, Busy Bee, or Super Sparkler).
 
 ## Match Flow
 
@@ -39,7 +39,8 @@ Lobby (bow-to-greet handshake + element/sprite pick) →
 
 1. On launch the home screen browses for nearby games over BLE: join one directly,
    or create (host) your own. The hosting device advertises; everyone else discovers
-   it automatically.
+   it automatically. Each discovered game shows its mode and how many players have
+   already joined.
 2. In the lobby each player greets every opponent: aim at them and bow (tilt the
    phone forward and back); they bow back to accept. This captures the relative
    bearings — no manual seat grid and no aim calibration. Then pick a character.

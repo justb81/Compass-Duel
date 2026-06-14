@@ -21,16 +21,24 @@ import com.justb81.compassduel.net.protocol.PlayerAction
  * - Shield posture application and per-round shield-time budget consumption.
  * - Round-over detection: last survivor or timer expired.
  * - Timeout outcome: highest HP wins; exact tie → draw (null winner id).
+ *
+ * @param roundDurationSeconds Active-phase length chosen by the host in the lobby; defaults to
+ *   [StandardRules.ROUND_DURATION_SECONDS]. The per-round shield budget scales with it.
  */
-class StandardRuleSet : ModeRuleSet {
+class StandardRuleSet(
+    override val roundDurationSeconds: Int = StandardRules.ROUND_DURATION_SECONDS,
+) : ModeRuleSet {
 
     override val aimToleranceDegrees: Float = Bearing.DEFAULT_TOLERANCE_DEGREES
-    override val roundDurationSeconds: Int = StandardRules.ROUND_DURATION_SECONDS
 
     override fun initialState(setup: List<EnginePlayerSetup>): EngineState.Standard =
         EngineState.Standard(
             players = setup.map { s ->
-                DuelPlayer(id = s.id, element = s.element)
+                DuelPlayer(
+                    id = s.id,
+                    element = s.element,
+                    shieldRemainingMillis = StandardRules.shieldBudgetMillis(roundDurationSeconds),
+                )
             }
         )
 

@@ -1,11 +1,25 @@
 package com.justb81.compassduel.net
 
+import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
-/** A player endpoint discovered during [startDiscovery]. */
-data class DiscoveredEndpoint(val endpointId: String, val name: String)
+/**
+ * A host endpoint discovered during [startDiscovery].
+ *
+ * @param endpointId The Nearby Connections endpoint id used to connect.
+ * @param name The host's display name (decoded from the advertised endpoint name).
+ * @param mode The host's selected game mode, or null when the advertisement predates this
+ *   metadata / could not be parsed.
+ * @param playerCount Players already in the host's lobby (0 when unknown). See [AdvertisedLobby].
+ */
+data class DiscoveredEndpoint(
+    val endpointId: String,
+    val name: String,
+    val mode: GameMode? = null,
+    val playerCount: Int = 0,
+)
 
 /** Events emitted when a connection is established or dropped. */
 sealed interface ConnectionEvent {
