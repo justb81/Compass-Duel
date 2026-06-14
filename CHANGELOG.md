@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.9.0](https://github.com/justb81/Compass-Duel/compare/v0.8.0...v0.9.0) (2026-06-14)
+
+
+### Features
+
+* Elemental Duel rename, host-configurable session length, richer discovery list ([#102](https://github.com/justb81/Compass-Duel/issues/102)) ([14edfb8](https://github.com/justb81/Compass-Duel/commit/14edfb8dd735bc271940fa10dbb0cc97e86d2f04))
+
+
+### Bug Fixes
+
+* **net:** pin Nearby Connections to BLE-only to stop the lobby Bluetooth pairing prompt ([#104](https://github.com/justb81/Compass-Duel/issues/104)) ([41d4c98](https://github.com/justb81/Compass-Duel/commit/41d4c98cb08f38805c2b37d4fbcb4dd10685b139))
+
 ## [0.8.0](https://github.com/justb81/Compass-Duel/compare/v0.7.0...v0.8.0) (2026-06-13)
 
 
