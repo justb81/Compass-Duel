@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/justb81/Compass-Duel/compare/v0.9.0...v0.9.1) (2026-06-14)
+
+
+### Bug Fixes
+
+* **net:** restore hosting (revert BLE-only) and use NON_DISRUPTIVE to mitigate the join pairing prompt ([#105](https://github.com/justb81/Compass-Duel/issues/105)) ([8af0315](https://github.com/justb81/Compass-Duel/commit/8af0315289d9391e5433b2734f69f2f0c419a764))
+
 ## [0.9.0](https://github.com/justb81/Compass-Duel/compare/v0.8.0...v0.9.0) (2026-06-14)
 
 
