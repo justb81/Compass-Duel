@@ -3,8 +3,8 @@
     <string name="app_name">Compass Duel</string>
 
     <!-- Nearby runtime-permission gate -->
-    <string name="permissions_rationale">Compass Duel needs Bluetooth permissions to find and connect to nearby players.</string>
-    <string name="permissions_denied_message">Permissions were denied. Please open app settings and grant Bluetooth access to play.</string>
+    <string name="permissions_rationale">Compass Duel needs Bluetooth and Wi-Fi permissions to find and connect to nearby players.</string>
+    <string name="permissions_denied_message">Permissions were denied. Please open app settings and grant Bluetooth and Wi-Fi access to play.</string>
     <string name="permissions_grant_button">Grant permissions</string>
     <string name="permissions_open_settings">Open settings</string>
 
@@ -89,8 +89,8 @@
     <string name="lobby_greet_done">✓ Greeted</string>
 
     <!-- Lobby — transport errors -->
-    <string name="lobby_error_host_failed">Couldn\'t start hosting. Make sure Bluetooth is on, then try again.</string>
-    <string name="lobby_error_discovery_failed">Couldn\'t search for hosts. Make sure Bluetooth is on.</string>
+    <string name="lobby_error_host_failed">Couldn\'t start hosting. Make sure Bluetooth and Wi-Fi are on, then try again.</string>
+    <string name="lobby_error_discovery_failed">Couldn\'t search for hosts. Make sure Bluetooth and Wi-Fi are on.</string>
     <string name="lobby_error_connect_failed">Couldn\'t connect to the host. Please try again.</string>
 
     <!-- Lobby — client connecting -->

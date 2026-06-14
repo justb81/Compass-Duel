@@ -2,18 +2,19 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- ── Nearby Connections (offline P2P: BLE-only, low power) ─────────── -->
+    <!-- ── Nearby Connections (offline P2P: BLE + Wi-Fi) ─────────────────── -->
     <!-- Bluetooth (API 31+). minSdk is 35, so the legacy BLUETOOTH/
          BLUETOOTH_ADMIN and ACCESS_*_LOCATION permissions are not needed —
-         neverForLocation declares we don't derive physical location.
-         Nearby is pinned to low power (BLE only) in NearbyConnectionManager so it
-         never negotiates the Wi-Fi/Bluetooth-Classic bandwidth upgrade — that
-         upgrade raises an OS Bluetooth pairing dialog on join. Because the Wi-Fi
-         medium is therefore unused, the ACCESS_WIFI_STATE / CHANGE_WIFI_STATE /
-         NEARBY_WIFI_DEVICES permissions are intentionally not declared. -->
+         neverForLocation declares we don't derive physical location. -->
     <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <!-- Wi-Fi (Nearby upgrades small BLE payloads to Wi-Fi Direct when available) -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
         android:usesPermissionFlags="neverForLocation" />
 
     <!-- Haptic feedback (hit / incoming attack / shield). -->

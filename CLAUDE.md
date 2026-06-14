@@ -22,12 +22,7 @@ no aim calibration. Aim is reported as the raw azimuth and the host cancels shar
 vehicle rotation via `CommonModeEstimator`; a player who leaves their seat
 (`MovementDetector`/`MovementPolicy`) forfeits the round and must re-greet. All
 networking runs offline over the **Google Nearby Connections API** (P2P_STAR topology:
-one Host + N Clients). All advertise/discover/connect calls are pinned to low power
-(`setLowPower(true)` in `NearbyConnectionManager`), constraining Nearby to **BLE only** —
-this deliberately forgoes the Wi-Fi/Bluetooth-Classic bandwidth upgrade, whose
-negotiation raises an OS Bluetooth pairing dialog on join. Do not re-add Wi-Fi
-permissions (`ACCESS_WIFI_STATE`/`CHANGE_WIFI_STATE`/`NEARBY_WIFI_DEVICES`) or drop
-`setLowPower`. The Host is authoritative for hit detection — clients never
+one Host + N Clients). The Host is authoritative for hit detection — clients never
 decide hits, which prevents cheating. Control messages (`RoundStart`/`RoundEnd`/`LobbyState`/
 `Rematch`/`Regreet` and the lobby-setup client→host messages) are delivered reliably via
 `ReliableMessageTransport` (sequenced envelope + ack + retransmit + dedup); only the

@@ -103,7 +103,7 @@ Lobby (greeting handshake) â†’ Get Ready (3s) â†’ Combat Phase (30/60/
 â”‚  â€¢ Compass/Position Registry        â”‚
 â”‚  â€¢ Nearby Connections Advertiser    â”‚
 â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜
-             â”‚ Nearby Connections (BLE P2P, low power)
+             â”‚ Nearby Connections (BLE + WiFi P2P)
     â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”´â”€â”€â”€â”€â”€â”€â”€â”€â”
     â”‚                 â”‚
 â”Œâ”€â”€â”€â–¼â”€â”€â”€â”         â”Œâ”€â”€â”€â–¼â”€â”€â”€â”
@@ -125,8 +125,6 @@ Lobby (greeting handshake) â†’ Get Ready (3s) â†’ Combat Phase (30/60/
 
 The **Google Nearby Connections API** serves as the communication layer. It abstracts Bluetooth Classic, BLE, and Wi-Fi behind a unified peer-to-peer API and works completely offline [^4]. The recommended topology is **P2P_STAR**: one hub (Host) accepts connections from up to N spokes (Clients) [^5].
 
-All advertise/discover/connect calls are pinned to **low power** (`setLowPower(true)`), which constrains Nearby to the **BLE** medium and forgoes the automatic Wi-Fi/Bluetooth-Classic bandwidth upgrade. The upgrade negotiation raises an OS Bluetooth pairing/coupling dialog on join, which breaks the game's flow; BLE-only is sufficient because the game is same-room and exchanges only small, event-based `BYTES` payloads.
-
 ```kotlin
 // Host: Start advertising
 connectionsClient.startAdvertising(
@@ -135,7 +133,6 @@ connectionsClient.startAdvertising(
     connectionLifecycleCallback,
     AdvertisingOptions.Builder()
         .setStrategy(Strategy.P2P_STAR)
-        .setLowPower(true)
         .build()
 )
 
@@ -145,7 +142,6 @@ connectionsClient.startDiscovery(
     endpointDiscoveryCallback,
     DiscoveryOptions.Builder()
         .setStrategy(Strategy.P2P_STAR)
-        .setLowPower(true)
         .build()
 )
 
@@ -371,7 +367,7 @@ vehicle distortion cancels per device, and shared (vehicle-turn) rotation is rem
 |---|---|---|
 | Language | Kotlin | Native Android, best sensor API support |
 | UI | Jetpack Compose + Canvas | Compass ring as Custom Canvas, rest in Compose |
-| Networking | Nearby Connections API (Google Play Services) | Offline P2P, BLE-only (low power), easy integration [^4] |
+| Networking | Nearby Connections API (Google Play Services) | Offline P2P, BLE+WiFi, easy integration [^4] |
 | Sensors | Android SensorManager | TYPE_ROTATION_VECTOR [^7] + Accelerometer |
 | Build | Gradle + Android Studio | Standard toolchain |
 | Min SDK | API 26 (Android 8.0) | Nearby Connections requirement |
@@ -409,7 +405,7 @@ vehicle distortion cancels per device, and shared (vehicle-turn) rotation is rem
 |---|---|---|
 | Magnetometer interference in car | Medium | Static distortion self-cancels per device in the bow handshake; vehicle-turn rotation removed by common-mode estimation [^9][^10] |
 | Nearby Connections discovery too slow | Low | Connect once at start, keep session open throughout [^6] |
-| Inconsistent BLE in moving train | Low | BYTES payloads are small and event-based, well within BLE throughput; the connection is pinned to low-power BLE on purpose (the Wi-Fi/Bluetooth-Classic upgrade raises an OS pairing dialog on join) [^12] |
+| Inconsistent BLE in moving train | Low | BYTES payloads are small; Nearby auto-upgrades to WiFi Direct when available [^12] |
 | Different coordinate systems per phone orientation | Medium | Implement `remapCoordinateSystem()` for all device orientations [^8][^13] |
 | Sensor accuracy warning (SENSOR_STATUS_UNRELIABLE) | Low | Check at game start, prompt user to perform figure-8 calibration [^14] |
 

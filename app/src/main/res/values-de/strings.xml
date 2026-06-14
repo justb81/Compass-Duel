@@ -3,8 +3,8 @@
     <string name="app_name">Compass Duel</string>
 
     <!-- Nearby runtime-permission gate -->
-    <string name="permissions_rationale">Compass Duel benötigt Bluetooth-Berechtigungen, um Mitspieler in der Nähe zu finden und zu verbinden.</string>
-    <string name="permissions_denied_message">Berechtigungen wurden verweigert. Bitte öffne die App-Einstellungen und erteile Bluetooth-Zugriff.</string>
+    <string name="permissions_rationale">Compass Duel benötigt Bluetooth- und WLAN-Berechtigungen, um Mitspieler in der Nähe zu finden und zu verbinden.</string>
+    <string name="permissions_denied_message">Berechtigungen wurden verweigert. Bitte öffne die App-Einstellungen und erteile Bluetooth- und WLAN-Zugriff.</string>
     <string name="permissions_grant_button">Berechtigungen erteilen</string>
     <string name="permissions_open_settings">Einstellungen öffnen</string>
 
@@ -89,8 +89,8 @@
     <string name="lobby_greet_done">✓ Begrüßt</string>
 
     <!-- Lobby — transport errors -->
-    <string name="lobby_error_host_failed">Hosten fehlgeschlagen. Stelle sicher, dass Bluetooth aktiviert ist, und versuche es erneut.</string>
-    <string name="lobby_error_discovery_failed">Suche nach Hosts fehlgeschlagen. Stelle sicher, dass Bluetooth aktiviert ist.</string>
+    <string name="lobby_error_host_failed">Hosten fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind, und versuche es erneut.</string>
+    <string name="lobby_error_discovery_failed">Suche nach Hosts fehlgeschlagen. Stelle sicher, dass Bluetooth und WLAN aktiviert sind.</string>
     <string name="lobby_error_connect_failed">Verbindung zum Host fehlgeschlagen. Bitte versuche es erneut.</string>
 
     <!-- Lobby — Verbindungsaufbau (Client) -->
