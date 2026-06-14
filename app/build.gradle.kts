@@ -75,7 +75,7 @@ dependencies {
     // Persistence (theme preference + last-used player name)
     implementation(libs.androidx.datastore.preferences)
 
-    // Offline P2P transport (BLE + Wi-Fi)
+    // Offline P2P transport (BLE-only, low power)
     implementation(libs.play.services.nearby)
 
     // Compact payload (de)serialization for game-state sync

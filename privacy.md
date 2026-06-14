@@ -22,7 +22,7 @@ any third party.
 
 Compass Duel is a local, offline multiplayer game. During a match, devices
 communicate directly with each other over Google's Nearby Connections API
-(Bluetooth and Wi-Fi) on a peer-to-peer basis. This connection is used only to
+(Bluetooth Low Energy) on a peer-to-peer basis. This connection is used only to
 exchange in-game information between the players in the same physical session.
 No game data is sent to us or to any external server, and nothing is stored
 after the match ends.
@@ -36,7 +36,7 @@ never recorded, stored, or transmitted.
 
 ## Permissions
 
-Any permissions the app requests (for example, Bluetooth, Wi-Fi, or nearby
+Any permissions the app requests (for example, Bluetooth or nearby
 device discovery) are used solely to enable local peer-to-peer gameplay between
 players in the same location. They are not used to collect or share data.
 
