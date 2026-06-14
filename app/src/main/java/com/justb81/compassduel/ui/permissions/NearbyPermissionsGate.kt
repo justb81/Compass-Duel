@@ -33,9 +33,8 @@ import com.justb81.compassduel.R
 /**
  * Runtime-permission gate for the Nearby Connections API.
  *
- * Nearby is pinned to low power (BLE only), so the only required runtime permissions
- * on minSdk 35 are the Bluetooth ones: BLUETOOTH_SCAN, BLUETOOTH_ADVERTISE, and
- * BLUETOOTH_CONNECT. The Wi-Fi medium is unused, so NEARBY_WIFI_DEVICES is not requested.
+ * On minSdk 35 all required Bluetooth and Wi-Fi permissions are runtime permissions:
+ * BLUETOOTH_SCAN, BLUETOOTH_ADVERTISE, BLUETOOTH_CONNECT, and NEARBY_WIFI_DEVICES.
  *
  * If all permissions are already granted, [content] is shown directly. Otherwise a
  * rationale prompt is displayed and the system permission dialog is launched.
@@ -111,6 +110,7 @@ private val NEARBY_PERMISSIONS = listOf(
     Manifest.permission.BLUETOOTH_SCAN,
     Manifest.permission.BLUETOOTH_ADVERTISE,
     Manifest.permission.BLUETOOTH_CONNECT,
+    Manifest.permission.NEARBY_WIFI_DEVICES,
 )
 
 private const val CONTENT_HORIZONTAL_PADDING_DP = 32

@@ -4,7 +4,7 @@ A local, offline Android multiplayer game for 2–4 players that turns physical
 device orientation into the core game mechanic. Aim your phone at opponents
 using the magnetometer/gyroscope, then fire with a quick swing or raise a shield
 by holding the phone upright and steady. All communication runs fully offline over the **Google Nearby
-Connections API** (BLE P2P, low power) — built for trains, cars and buses, no
+Connections API** (BLE + Wi-Fi P2P) — built for trains, cars and buses, no
 internet required.
 
 See [`docs/game-spec.md`](docs/game-spec.md) for the complete game concept and
@@ -57,12 +57,12 @@ The game requests these permissions at first launch:
 - `BLUETOOTH_SCAN` — discover nearby devices
 - `BLUETOOTH_ADVERTISE` — advertise as a host
 - `BLUETOOTH_CONNECT` — establish connections
+- `NEARBY_WIFI_DEVICES` — Wi-Fi Direct upgrade for larger payloads
 - `ACTIVITY_RECOGNITION` — optional step detection to flag a player who leaves
   their seat mid-round; the game degrades to significant-motion-only if denied
 
-Nearby is pinned to low-power BLE (no Wi-Fi medium), so only the Bluetooth
-permissions are required by the Google Nearby Connections API, and they are only
-used for local, offline peer-to-peer play.
+The Bluetooth/Wi-Fi permissions are required by the Google Nearby Connections API
+and are only used for local, offline peer-to-peer play.
 
 ## Deferred for a Future Release
 
@@ -83,7 +83,7 @@ of magic tag with no damage, no elimination and an award for every child. See
 - **Language:** Kotlin, JDK 17
 - **UI:** Jetpack Compose (Material 3) + Canvas for the compass ring
 - **DI:** Hilt (Dagger)
-- **Networking:** Google Nearby Connections API (offline P2P: BLE-only, low power)
+- **Networking:** Google Nearby Connections API (offline P2P: BLE + Wi-Fi)
 - **Sensors:** Android `SensorManager` (`TYPE_ROTATION_VECTOR` + accelerometer)
 - **Serialization:** kotlinx.serialization (compact game-state payloads)
 - **Build:** Gradle with version catalog, AGP 9, convention plugins

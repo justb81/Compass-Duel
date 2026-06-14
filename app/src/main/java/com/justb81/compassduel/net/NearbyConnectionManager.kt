@@ -6,6 +6,7 @@ import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
 import com.google.android.gms.nearby.connection.ConnectionOptions
 import com.google.android.gms.nearby.connection.ConnectionResolution
+import com.google.android.gms.nearby.connection.ConnectionType
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo
 import com.google.android.gms.nearby.connection.DiscoveryOptions
@@ -36,12 +37,12 @@ import javax.inject.Singleton
  * All connections are auto-accepted: v1 uses a trusted local group (players are
  * in the same room) and does not need pairing confirmation.
  *
- * Every advertise/discover/connect call is pinned to low power
- * ([AdvertisingOptions.Builder.setLowPower] etc.), which constrains Nearby to the
- * **BLE** medium. This deliberately forgoes the automatic Wi-Fi/Bluetooth-Classic
- * bandwidth upgrade: that upgrade negotiation raises an OS Bluetooth pairing/coupling
- * dialog on join, which breaks the game's flow. BLE-only is sufficient here because the
- * game is same-room and exchanges only small, compact-serialized BYTES payloads.
+ * Advertise and connect requests use [ConnectionType.NON_DISRUPTIVE]: all transport
+ * mediums stay available (so `P2P_STAR` hosting works — do NOT use `setLowPower(true)`,
+ * which constrains Nearby to BLE and makes `startAdvertising` fail), but Nearby is told
+ * not to change Wi-Fi/Bluetooth status to upgrade bandwidth. That disruptive upgrade is
+ * what raises the OS Bluetooth pairing/coupling dialog on join; the game only exchanges
+ * small `BYTES` payloads, so the non-disruptive default medium is sufficient.
  *
  * This class is deliberately thin and not unit-tested; the untestable Play Services
  * callbacks are the only logic here. Session logic lives in GameSession which
@@ -174,7 +175,7 @@ class NearbyConnectionManager @Inject constructor(
             connectionsClient.stopAdvertising()
             val options = AdvertisingOptions.Builder()
                 .setStrategy(Strategy.P2P_STAR)
-                .setLowPower(true)
+                .setConnectionType(ConnectionType.NON_DISRUPTIVE)
                 .build()
             connectionsClient
                 .startAdvertising(localName, SERVICE_ID, connectionLifecycleCallback, options)
@@ -187,10 +188,7 @@ class NearbyConnectionManager @Inject constructor(
     @Suppress("TooGenericExceptionCaught")
     override fun startDiscovery() {
         try {
-            val options = DiscoveryOptions.Builder()
-                .setStrategy(Strategy.P2P_STAR)
-                .setLowPower(true)
-                .build()
+            val options = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
             connectionsClient
                 .startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
                 .addOnFailureListener { e -> reportFailure(TransportError.DISCOVER, "startDiscovery", e) }
@@ -212,7 +210,9 @@ class NearbyConnectionManager @Inject constructor(
     @Suppress("TooGenericExceptionCaught")
     override fun requestConnection(endpointId: String, localName: String) {
         try {
-            val options = ConnectionOptions.Builder().setLowPower(true).build()
+            val options = ConnectionOptions.Builder()
+                .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+                .build()
             connectionsClient
                 .requestConnection(localName, endpointId, connectionLifecycleCallback, options)
                 .addOnFailureListener { e -> reportFailure(TransportError.CONNECT, "requestConnection to $endpointId", e) }
