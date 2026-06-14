@@ -4,7 +4,9 @@ import android.util.Log
 import com.google.android.gms.nearby.connection.AdvertisingOptions
 import com.google.android.gms.nearby.connection.ConnectionInfo
 import com.google.android.gms.nearby.connection.ConnectionLifecycleCallback
+import com.google.android.gms.nearby.connection.ConnectionOptions
 import com.google.android.gms.nearby.connection.ConnectionResolution
+import com.google.android.gms.nearby.connection.ConnectionType
 import com.google.android.gms.nearby.connection.ConnectionsClient
 import com.google.android.gms.nearby.connection.DiscoveredEndpointInfo
 import com.google.android.gms.nearby.connection.DiscoveryOptions
@@ -34,6 +36,13 @@ import javax.inject.Singleton
  *
  * All connections are auto-accepted: v1 uses a trusted local group (players are
  * in the same room) and does not need pairing confirmation.
+ *
+ * Advertise and connect requests use [ConnectionType.NON_DISRUPTIVE]: all transport
+ * mediums stay available (so `P2P_STAR` hosting works — do NOT use `setLowPower(true)`,
+ * which constrains Nearby to BLE and makes `startAdvertising` fail), but Nearby is told
+ * not to change Wi-Fi/Bluetooth status to upgrade bandwidth. That disruptive upgrade is
+ * what raises the OS Bluetooth pairing/coupling dialog on join; the game only exchanges
+ * small `BYTES` payloads, so the non-disruptive default medium is sufficient.
  *
  * This class is deliberately thin and not unit-tested; the untestable Play Services
  * callbacks are the only logic here. Session logic lives in GameSession which
@@ -164,7 +173,10 @@ class NearbyConnectionManager @Inject constructor(
             // re-advertises with an updated endpoint name (mode + player count) as the lobby
             // changes (#98). Stopping advertising does not drop already-established connections.
             connectionsClient.stopAdvertising()
-            val options = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
+            val options = AdvertisingOptions.Builder()
+                .setStrategy(Strategy.P2P_STAR)
+                .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+                .build()
             connectionsClient
                 .startAdvertising(localName, SERVICE_ID, connectionLifecycleCallback, options)
                 .addOnFailureListener { e -> reportFailure(TransportError.ADVERTISE, "startAdvertising", e) }
@@ -198,8 +210,11 @@ class NearbyConnectionManager @Inject constructor(
     @Suppress("TooGenericExceptionCaught")
     override fun requestConnection(endpointId: String, localName: String) {
         try {
+            val options = ConnectionOptions.Builder()
+                .setConnectionType(ConnectionType.NON_DISRUPTIVE)
+                .build()
             connectionsClient
-                .requestConnection(localName, endpointId, connectionLifecycleCallback)
+                .requestConnection(localName, endpointId, connectionLifecycleCallback, options)
                 .addOnFailureListener { e -> reportFailure(TransportError.CONNECT, "requestConnection to $endpointId", e) }
         } catch (e: Exception) {
             reportFailure(TransportError.CONNECT, "requestConnection to $endpointId", e)

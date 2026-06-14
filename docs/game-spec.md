@@ -125,6 +125,8 @@ Lobby (greeting handshake) â†’ Get Ready (3s) â†’ Combat Phase (30/60/
 
 The **Google Nearby Connections API** serves as the communication layer. It abstracts Bluetooth Classic, BLE, and Wi-Fi behind a unified peer-to-peer API and works completely offline [^4]. The recommended topology is **P2P_STAR**: one hub (Host) accepts connections from up to N spokes (Clients) [^5].
 
+Advertise/connect requests use `ConnectionType.NON_DISRUPTIVE`: all mediums stay available (so `P2P_STAR` hosting works) but Nearby will not change Wi-Fi/Bluetooth status to upgrade bandwidth — the disruptive upgrade is what raises an OS Bluetooth pairing dialog on join, and the small `BYTES` payloads here don't need the extra throughput. `setLowPower(true)` must **not** be used: it constrains Nearby to BLE and makes `startAdvertising` fail (it broke hosting in 0.9.0).
+
 ```kotlin
 // Host: Start advertising
 connectionsClient.startAdvertising(
