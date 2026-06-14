@@ -60,7 +60,7 @@ private const val MAX_PLAYERS = 4
  *
  * Discovery runs only inside [NearbyPermissionsGate] — it starts when the gate's content
  * enters composition (permissions granted) and stops when it leaves, so the Nearby API is
- * never touched before the user has granted Bluetooth/Wi-Fi access.
+ * never touched before the user has granted Bluetooth access.
  *
  * @param onNavigateToLobby Called with `isHost = true` when the user creates a game,
  *   or `isHost = false` when the user joins one.
