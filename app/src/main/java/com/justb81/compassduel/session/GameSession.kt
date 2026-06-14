@@ -11,6 +11,7 @@ import com.justb81.compassduel.game.engine.KidsRuleSet
 import com.justb81.compassduel.game.engine.ModeRuleSet
 import com.justb81.compassduel.game.engine.RoundOutcome
 import com.justb81.compassduel.game.engine.StandardRuleSet
+import com.justb81.compassduel.game.kids.KidsRules
 import com.justb81.compassduel.game.standard.MatchScore
 import com.justb81.compassduel.game.standard.StandardRules
 import com.justb81.compassduel.net.AdvertisedLobby
@@ -258,8 +259,12 @@ class GameSession @Inject constructor(
     private var matchScore: MatchScore = MatchScore()
     private var matchInProgress: Boolean = false
 
-    /** Host-selected round length (seconds) and series length (best-of). See [setRoundDuration]/[setBestOf]. */
-    private var selectedRoundDurationSeconds: Int = StandardRules.ROUND_DURATION_SECONDS
+    /**
+     * Host-selected round length (seconds) and series length (best-of). See [setRoundDuration]/
+     * [setBestOf]. A null round length means "use the mode's own default" (Standard 90 s / Kids
+     * 60 s) until the host picks one — see [effectiveRoundDuration].
+     */
+    private var selectedRoundDurationSeconds: Int? = null
     private var selectedBestOf: Int = DEFAULT_BEST_OF
 
     /** Last endpoint name advertised by the host, so [maybeReadvertise] only re-advertises on change. */
@@ -343,6 +348,13 @@ class GameSession @Inject constructor(
     /** The effective series length for [mode]: always 1 in Kids Mode, else the host's choice. */
     private fun effectiveBestOf(mode: GameMode): Int =
         if (mode == GameMode.KIDS) 1 else selectedBestOf
+
+    /** The round length to use for [mode]: the host's explicit choice, else the mode's default. */
+    private fun effectiveRoundDuration(mode: GameMode): Int =
+        selectedRoundDurationSeconds ?: when (mode) {
+            GameMode.STANDARD -> StandardRules.ROUND_DURATION_SECONDS
+            GameMode.KIDS -> KidsRules.ROUND_DURATION_SECONDS
+        }
 
     /** Rounds a player must win for a best-of-[bestOf] series (1→1, 3→2, 5→3). */
     private fun bestOfToRoundsToWin(bestOf: Int): Int = (bestOf + 1) / 2
@@ -954,8 +966,8 @@ class GameSession @Inject constructor(
     // ---------------------------------------------------------------------------
 
     private fun ruleSetFor(mode: GameMode): ModeRuleSet = when (mode) {
-        GameMode.STANDARD -> StandardRuleSet(selectedRoundDurationSeconds)
-        GameMode.KIDS -> KidsRuleSet(selectedRoundDurationSeconds)
+        GameMode.STANDARD -> StandardRuleSet(effectiveRoundDuration(mode))
+        GameMode.KIDS -> KidsRuleSet(effectiveRoundDuration(mode))
     }
 
     private fun startRoundInternal(mode: GameMode, players: List<LobbyPlayer>) {
@@ -1143,12 +1155,13 @@ class GameSession @Inject constructor(
             }
         }
         val bestOf = effectiveBestOf(mode)
+        val roundDuration = effectiveRoundDuration(mode)
         _lobby.value = NetMessage.LobbyState(
             mode = mode,
             players = players,
             yourPlayerId = HOST_PLAYER_ID,
             yourBearings = matrix[HOST_PLAYER_ID].orEmpty(),
-            roundDurationSeconds = selectedRoundDurationSeconds,
+            roundDurationSeconds = roundDuration,
             bestOf = bestOf,
         )
         endpointToPlayerId.forEach { (endpointId, playerId) ->
@@ -1159,7 +1172,7 @@ class GameSession @Inject constructor(
                     players = players,
                     yourPlayerId = playerId,
                     yourBearings = matrix[playerId].orEmpty(),
-                    roundDurationSeconds = selectedRoundDurationSeconds,
+                    roundDurationSeconds = roundDuration,
                     bestOf = bestOf,
                 ),
             )
@@ -1252,7 +1265,7 @@ class GameSession @Inject constructor(
         roundIndex = 0
         matchScore = MatchScore()
         matchInProgress = false
-        selectedRoundDurationSeconds = StandardRules.ROUND_DURATION_SECONDS
+        selectedRoundDurationSeconds = null
         selectedBestOf = DEFAULT_BEST_OF
         lastAdvertisedName = null
         transport.acceptNewConnections = true
