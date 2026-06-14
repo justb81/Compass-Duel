@@ -74,12 +74,14 @@ All inputs are evaluated centrally on the Host device â€” no client-side hi
 ### Round Structure
 
 ```
-Lobby (greeting handshake) â†’ Get Ready (3s) â†’ Combat Phase (90s) â†’ Results â†’ Rematch?
+Lobby (greeting handshake) â†’ Get Ready (3s) â†’ Combat Phase (30/60/90s) â†’ Results â†’ Rematch?
 ```
 
 - **Combat Phase:** Each player starts with 100 HP. First to reach 0 is eliminated.
+  The host picks the round length (30/60/90 s) in the lobby; the shield budget is always
+  half the round.
 - **Last survivor** wins the round.
-- **Best of 3 rounds** â†’ overall winner.
+- **Series:** the host picks best of one, three, or five round wins â†’ overall winner.
 
 ### Special Rules for 3â€“4 Players
 
@@ -510,11 +512,11 @@ The COUNTDOWN phase is now just a 3-second "get ready" window. Vehicle-turn drif
 removed by `CommonModeEstimator`; a player who physically leaves their seat (detected by
 `MovementDetector` → `MovementPolicy`) forfeits the round and must re-greet.
 
-### Standard-mode 90 s timeout outcome
+### Standard-mode timeout outcome
 
-When the 90-second timer expires with more than one player still alive, the player
-with the highest HP wins the round. If two or more players are exactly tied on HP
-at timeout, the round is scored as a draw (no round win awarded to either).
+When the round timer (30/60/90 s, host-selected) expires with more than one player
+still alive, the player with the highest HP wins the round. If two or more players are
+exactly tied on HP at timeout, the round is scored as a draw (no round win awarded to either).
 
 ### Payload schema location
 

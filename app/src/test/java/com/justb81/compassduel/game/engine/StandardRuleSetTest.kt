@@ -44,6 +44,22 @@ class StandardRuleSetTest {
         assertTrue(state.players.all { it.hp == StandardRules.MAX_HP })
     }
 
+    @Test
+    fun `default round length yields the default shield budget`() {
+        assertEquals(StandardRules.ROUND_DURATION_SECONDS, rules.roundDurationSeconds)
+        val state = rules.initialState(setup) as EngineState.Standard
+        assertTrue(state.players.all { it.shieldRemainingMillis == StandardRules.SHIELD_BUDGET_MILLIS })
+    }
+
+    @Test
+    fun `configured round length scales the shield budget to half the round (#101)`() {
+        val shortRules = StandardRuleSet(roundDurationSeconds = 30)
+        assertEquals(30, shortRules.roundDurationSeconds)
+        val state = shortRules.initialState(setup) as EngineState.Standard
+        // 30 s round → 15 000 ms shield budget (50 %).
+        assertTrue(state.players.all { it.shieldRemainingMillis == 15_000L })
+    }
+
     // ---------------------------------------------------------------------------
     // Attack with element modifier
     // ---------------------------------------------------------------------------

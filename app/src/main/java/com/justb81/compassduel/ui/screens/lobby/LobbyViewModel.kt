@@ -8,8 +8,10 @@ import com.justb81.compassduel.game.Element
 import com.justb81.compassduel.game.engine.GameClock
 import com.justb81.compassduel.game.gesture.BowDetector
 import com.justb81.compassduel.game.gesture.BowSample
+import com.justb81.compassduel.game.standard.StandardRules
 import com.justb81.compassduel.haptics.HapticFeedback
 import com.justb81.compassduel.net.TransportError
+import com.justb81.compassduel.net.protocol.DEFAULT_BEST_OF
 import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.LobbyPlayer
 import com.justb81.compassduel.sensor.OrientationSample
@@ -54,6 +56,10 @@ data class LobbyUiState(
     val players: List<LobbyPlayer> = emptyList(),
     /** Current game mode chosen by the host. */
     val mode: GameMode = GameMode.STANDARD,
+    /** Host-selected round length in seconds (30/60/90). */
+    val roundDurationSeconds: Int = StandardRules.ROUND_DURATION_SECONDS,
+    /** Host-selected series length (best of 1/3/5); always 1 in Kids Mode. */
+    val bestOf: Int = DEFAULT_BEST_OF,
     /** The local player's id (assigned by the host; 0 = not yet known). */
     val myPlayerId: Int = 0,
     /** True while the client has committed to a host but not yet received a LobbyState. */
@@ -161,6 +167,8 @@ class LobbyViewModel @Inject constructor(
             LobbyUiState(
                 players = lobby.players,
                 mode = lobby.mode,
+                roundDurationSeconds = lobby.roundDurationSeconds,
+                bestOf = lobby.bestOf,
                 myPlayerId = lobby.yourPlayerId,
                 isConnecting = false,
                 startErrorRes = startErrorRes,
@@ -210,6 +218,16 @@ class LobbyViewModel @Inject constructor(
     /** Changes the game mode (host only). */
     fun setMode(mode: GameMode) {
         session.setMode(mode)
+    }
+
+    /** Sets the per-round length in seconds (host only; 30/60/90). */
+    fun setRoundDuration(seconds: Int) {
+        session.setRoundDuration(seconds)
+    }
+
+    /** Sets the match series length (host only; best of 1/3/5). */
+    fun setBestOf(bestOf: Int) {
+        session.setBestOf(bestOf)
     }
 
     /**

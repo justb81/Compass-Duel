@@ -5,10 +5,12 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import com.justb81.compassduel.data.preferences.UserPreferencesRepository
 import com.justb81.compassduel.game.engine.GameClock
+import com.justb81.compassduel.net.AdvertisedLobby
 import com.justb81.compassduel.net.ConnectionEvent
 import com.justb81.compassduel.net.DiscoveredEndpoint
 import com.justb81.compassduel.net.MessageTransport
 import com.justb81.compassduel.net.TransportError
+import com.justb81.compassduel.net.protocol.GameMode
 import com.justb81.compassduel.net.protocol.NetMessage
 import com.justb81.compassduel.session.GameEngineFactory
 import com.justb81.compassduel.session.GameSession
@@ -106,7 +108,24 @@ class HomeViewModelTest {
         yield()
 
         assertTrue(transport.advertisingStarted)
-        assertEquals("Alice", transport.advertisedName)
+        // The host advertises an encoded name carrying mode + player count (#98).
+        val decoded = AdvertisedLobby.decode(transport.advertisedName!!)
+        assertEquals("Alice", decoded.name)
+        assertEquals(GameMode.STANDARD, decoded.mode)
+        assertEquals(1, decoded.playerCount)
+    }
+
+    @Test
+    fun `discovered endpoints surface mode and player count to the UI`() = testScope.runTest {
+        val viewModel = buildViewModel()
+        transport.setDiscovered(
+            listOf(DiscoveredEndpoint("host-ep", "Alice", GameMode.KIDS, playerCount = 3)),
+        )
+        yield()
+
+        val endpoint = viewModel.discoveredEndpoints.value.single()
+        assertEquals(GameMode.KIDS, endpoint.mode)
+        assertEquals(3, endpoint.playerCount)
     }
 
     @Test
@@ -233,6 +252,11 @@ class HomeViewModelTest {
         override fun sendReliable(endpointId: String, message: NetMessage) = Unit
         override fun broadcastReliable(message: NetMessage) = Unit
         override fun stopAll() = Unit
+
+        /** Drives the discovered-endpoints flow so pass-through to the UI can be asserted. */
+        fun setDiscovered(endpoints: List<DiscoveredEndpoint>) {
+            _discoveredEndpoints.value = endpoints
+        }
 
         companion object {
             private const val BUFFER_CAPACITY = 64

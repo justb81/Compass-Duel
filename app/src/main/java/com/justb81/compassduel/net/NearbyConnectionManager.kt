@@ -109,12 +109,17 @@ class NearbyConnectionManager @Inject constructor(
 
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
+            val decoded = AdvertisedLobby.decode(info.endpointName)
             _discoveredEndpoints.update { current ->
-                if (current.none { it.endpointId == endpointId }) {
-                    current + DiscoveredEndpoint(endpointId, info.endpointName)
-                } else {
-                    current
-                }
+                // Replace any prior entry for this endpoint so a re-advertise (e.g. an updated
+                // player count) refreshes the shown metadata rather than being ignored.
+                val others = current.filter { it.endpointId != endpointId }
+                others + DiscoveredEndpoint(
+                    endpointId = endpointId,
+                    name = decoded.name,
+                    mode = decoded.mode,
+                    playerCount = decoded.playerCount,
+                )
             }
         }
 
@@ -155,6 +160,10 @@ class NearbyConnectionManager @Inject constructor(
     @Suppress("TooGenericExceptionCaught")
     override fun startAdvertising(localName: String) {
         try {
+            // Stop any prior advertising first so this call is safely re-callable: the host
+            // re-advertises with an updated endpoint name (mode + player count) as the lobby
+            // changes (#98). Stopping advertising does not drop already-established connections.
+            connectionsClient.stopAdvertising()
             val options = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_STAR).build()
             connectionsClient
                 .startAdvertising(localName, SERVICE_ID, connectionLifecycleCallback, options)

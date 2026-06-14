@@ -106,4 +106,28 @@ class MatchScoreTest {
         assertEquals(winnerA, winnerB)
         assertEquals(2, winnerA)
     }
+
+    // ---------------------------------------------------------------------------
+    // matchWinnerId — configurable roundsToWin (best-of selection, #101)
+    // ---------------------------------------------------------------------------
+
+    @Test
+    fun `best-of-1 (roundsToWin 1) decides the match after a single round win`() {
+        val score = MatchScore(roundsToWin = 1).recordRoundWin(1)
+        assertEquals(1, score.matchWinnerId())
+    }
+
+    @Test
+    fun `best-of-5 (roundsToWin 3) needs three wins — two is not enough`() {
+        val twoWins = MatchScore(roundsToWin = 3).recordRoundWin(1).recordRoundWin(1)
+        assertNull(twoWins.matchWinnerId())
+        val threeWins = twoWins.recordRoundWin(1)
+        assertEquals(1, threeWins.matchWinnerId())
+    }
+
+    @Test
+    fun `recordRoundWin preserves the configured roundsToWin`() {
+        val score = MatchScore(roundsToWin = 3).recordRoundWin(1)
+        assertEquals(3, score.roundsToWin)
+    }
 }

@@ -22,11 +22,15 @@ import com.justb81.compassduel.net.protocol.PlayerAction
  * - REST_OVER event emission when rest windows expire.
  * - Round ends only on timer (no elimination in Kids Mode).
  * - The wider 40° aim cone applies.
+ *
+ * @param roundDurationSeconds Active-phase length chosen by the host in the lobby; defaults to
+ *   [KidsRules.ROUND_DURATION_SECONDS].
  */
-class KidsRuleSet : ModeRuleSet {
+class KidsRuleSet(
+    override val roundDurationSeconds: Int = KidsRules.ROUND_DURATION_SECONDS,
+) : ModeRuleSet {
 
     override val aimToleranceDegrees: Float = KidsRules.AIM_TOLERANCE_DEGREES
-    override val roundDurationSeconds: Int = KidsRules.ROUND_DURATION_SECONDS
 
     override fun initialState(setup: List<EnginePlayerSetup>): EngineState.Kids =
         EngineState.Kids(

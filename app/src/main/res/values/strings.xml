@@ -10,13 +10,15 @@
 
     <!-- Home screen -->
     <string name="home_player_name_label">Your name</string>
-    <string name="home_mode_standard">Standard</string>
+    <string name="home_mode_standard">Elemental Duel</string>
     <string name="home_mode_kids">Star Catchers</string>
     <string name="home_create_game">Create game</string>
     <string name="home_nearby_header">Nearby games</string>
     <string name="home_searching">Searching for nearby games…</string>
     <string name="home_no_games_found">No games yet. Create your own, or wait for a host nearby.</string>
     <string name="home_join_button">Join</string>
+    <!-- Discovery card subtitle: "<mode> · <connected>/<max> players" -->
+    <string name="home_nearby_game_subtitle">%1$s · %2$d/%3$d players</string>
     <string name="home_theme_system">System</string>
     <string name="home_theme_light">Light</string>
     <string name="home_theme_dark">Dark</string>
@@ -44,6 +46,26 @@
     <string name="lobby_character_header">Choose your character</string>
     <string name="lobby_start_button">Start game</string>
     <string name="lobby_waiting_for_host">Waiting for the host to start…</string>
+
+    <!-- Lobby — round length & series length (host-configurable; #101) -->
+    <string name="lobby_round_length_label">Round length</string>
+    <string name="lobby_best_of_label">Match length</string>
+    <!-- Read-only summary shown to clients: "<round length> · <match length>" -->
+    <string name="lobby_config_summary">%1$s · %2$s</string>
+    <!-- Round length (Elemental Duel): 30s / 60s / 90s -->
+    <string name="round_length_standard_30">Skirmish</string>
+    <string name="round_length_standard_60">Duel</string>
+    <string name="round_length_standard_90">Epic Battle</string>
+    <!-- Round length (Star Catchers): 30s / 60s / 90s -->
+    <string name="round_length_kids_30">Shooting Star</string>
+    <string name="round_length_kids_60">Star Hunt</string>
+    <string name="round_length_kids_90">Galaxy Quest</string>
+    <!-- Match length / best-of (Elemental Duel): best of 1 / 3 / 5 -->
+    <string name="best_of_standard_1">Sudden Death</string>
+    <string name="best_of_standard_3">Best of Three</string>
+    <string name="best_of_standard_5">Championship</string>
+    <!-- Match length (Star Catchers): only a single round -->
+    <string name="best_of_kids_1">One Round</string>
 
     <!-- Lobby — start-match validation errors -->
     <string name="lobby_start_error_no_lobby">Couldn\'t start — no lobby.</string>
