@@ -68,6 +68,15 @@ class GestureClassifierTest {
         assertEquals(GestureEvent.FIRE, kidsClassifier.onSample(softSwing))
     }
 
+    @Test
+    fun `the first gentle sample returns null and does not arm the shield instantly`() {
+        // A single upright-steady sample only starts the arming timer; with no prior
+        // history it neither fires nor activates the shield before the hold window
+        // elapses (first-sample path, issue #58).
+        assertNull(standardClassifier.onSample(sample(baseTime)))
+        assertFalse(standardClassifier.isShieldActive)
+    }
+
     // ---------------------------------------------------------------------------
     // SHIELD — hold upright & steady for >= 1 s
     // ---------------------------------------------------------------------------
@@ -111,6 +120,30 @@ class GestureClassifierTest {
         val swing = sample(baseTime + POST_ACTIVATION_MILLIS, accel = GestureThresholds.FIRE_SWING_MPS2 + 1f)
         assertEquals(GestureEvent.FIRE, standardClassifier.onSample(swing))
         assertFalse(standardClassifier.isShieldActive)
+    }
+
+    @Test
+    fun `a fire swing resets an in-progress shield arming`() {
+        // Begin arming, reach half the hold window, then fire before the shield activates.
+        standardClassifier.onSample(sample(baseTime))
+        val midHold = baseTime + GestureThresholds.SHIELD_HOLD_MILLIS / 2
+        assertEquals(HALF, standardClassifier.shieldArmProgress(midHold), DELTA)
+        val swing = sample(midHold, accel = GestureThresholds.FIRE_SWING_MPS2 + 1f)
+        assertEquals(GestureEvent.FIRE, standardClassifier.onSample(swing))
+        // The hold must accumulate again from scratch — arming progress is wiped.
+        assertEquals(0f, standardClassifier.shieldArmProgress(midHold), DELTA)
+    }
+
+    @Test
+    fun `an active shield survives motion while the phone stays upright`() {
+        activateShield()
+        assertTrue(standardClassifier.isShieldActive)
+        // Steadiness is only required to *arm* the timer, not to maintain an already-active
+        // shield: an upright-but-shaky sample (above steady, below the swing threshold) keeps it up.
+        standardClassifier.onSample(
+            sample(baseTime + POST_ACTIVATION_MILLIS, accel = GestureThresholds.STEADY_ACCEL_MPS2 + 0.5f),
+        )
+        assertTrue(standardClassifier.isShieldActive)
     }
 
     @Test
