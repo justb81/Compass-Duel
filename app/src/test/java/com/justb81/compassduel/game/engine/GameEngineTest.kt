@@ -322,6 +322,46 @@ class GameEngineTest {
         engine.stop()
     }
 
+    @Test
+    fun `engine roundOutcome names the sole survivor after a knockout`() = runTest {
+        val clock = FakeClock()
+        val engine = standardEngine(clock, this)
+        engine.startRound(standardSetup, roundIndex = 0)
+
+        clock.advance(COUNTDOWN_MILLIS + 1L)
+        engine.tick()
+
+        // Player 1 KOs player 2 — player 1 is the sole survivor.
+        repeat(ATTACKS_TO_KO) {
+            clock.advance(StandardRules.ATTACK_COOLDOWN_MILLIS)
+            engine.submitInput(1, 180f, false, PlayerAction.ATTACK)
+            engine.tick()
+        }
+
+        val outcome = engine.roundOutcome() as RoundOutcome.StandardWinner
+        assertEquals(1, outcome.winnerId)
+        engine.stop()
+    }
+
+    @Test
+    fun `engine roundOutcome is a draw when the timer expires with tied HP`() = runTest {
+        val clock = FakeClock()
+        val engine = standardEngine(clock, this)
+        engine.startRound(standardSetup, roundIndex = 0)
+
+        clock.advance(COUNTDOWN_MILLIS + 1L)
+        engine.tick()
+
+        // No attacks land — both players sit at full HP when the timer expires → draw.
+        clock.advance(StandardRules.ROUND_DURATION_SECONDS * MILLIS_PER_SECOND.toLong())
+        engine.tick()
+
+        assertEquals(RoundPhase.ROUND_OVER, engine.snapshots.value.phase)
+        val outcome = engine.roundOutcome() as RoundOutcome.StandardWinner
+        assertNull(outcome.winnerId)
+        engine.stop()
+    }
+
     // ---------------------------------------------------------------------------
     // COUNTDOWN->PLAYING timer continuity (Issue #57)
     // ---------------------------------------------------------------------------

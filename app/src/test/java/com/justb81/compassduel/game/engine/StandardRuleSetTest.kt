@@ -262,6 +262,14 @@ class StandardRuleSetTest {
         assertEquals(1, outcome.winnerId)
     }
 
+    @Test
+    fun `all-eliminated (simultaneous KO) outcome is a draw`() {
+        // Both players reach 0 HP — no survivor and no highest-HP tiebreak applies.
+        val state = twoPlayerState(hp1 = 0, hp2 = 0)
+        val outcome = rules.roundOutcome(state) as RoundOutcome.StandardWinner
+        assertNull(outcome.winnerId)
+    }
+
     // ---------------------------------------------------------------------------
     // ELIMINATED event
     // ---------------------------------------------------------------------------

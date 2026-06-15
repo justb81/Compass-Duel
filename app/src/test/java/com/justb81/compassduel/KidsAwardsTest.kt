@@ -4,6 +4,7 @@ import com.justb81.compassduel.game.kids.KidsAward
 import com.justb81.compassduel.game.kids.KidsRoundStats
 import com.justb81.compassduel.game.kids.assignAwards
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 class KidsAwardsTest {
@@ -53,6 +54,37 @@ class KidsAwardsTest {
 
         assertEquals(KidsAward.SUPER_SPARKLER, awards[1])
         assertEquals(KidsAward.SUPER_SPARKLER, awards[2])
+    }
+
+    @Test
+    fun `champion removed before the bubble pass sends bubble hero to the best remaining bubbler`() {
+        // Player 1 leads BOTH stars and bubble blocks. Because the greedy assignment removes
+        // the champion from the pool before the bubble pass, BUBBLE_HERO goes to the best
+        // *remaining* bubbler (player 2) rather than the overall best bubbler (player 1).
+        // This documents the "one award each" priority-removal trade-off flagged in issue #59.
+        val stats = listOf(
+            KidsRoundStats(playerId = 1, stars = 10, bubbleBlocks = 5, sparklesThrown = 0),
+            KidsRoundStats(playerId = 2, stars = 2, bubbleBlocks = 4, sparklesThrown = 0),
+            KidsRoundStats(playerId = 3, stars = 1, bubbleBlocks = 0, sparklesThrown = 6),
+        )
+
+        val awards = assignAwards(stats)
+
+        assertEquals(KidsAward.STAR_CHAMPION, awards[1])
+        assertEquals(KidsAward.BUBBLE_HERO, awards[2])
+        assertEquals(KidsAward.BUSY_BEE, awards[3])
+    }
+
+    @Test
+    fun `with four players and no activity everyone is a super sparkler`() {
+        val stats = (1..4).map {
+            KidsRoundStats(playerId = it, stars = 0, bubbleBlocks = 0, sparklesThrown = 0)
+        }
+
+        val awards = assignAwards(stats)
+
+        assertEquals(setOf(1, 2, 3, 4), awards.keys)
+        assertTrue(awards.values.all { it == KidsAward.SUPER_SPARKLER })
     }
 
     @Test

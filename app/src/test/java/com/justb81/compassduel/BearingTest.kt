@@ -29,4 +29,13 @@ class BearingTest {
         assertTrue(Bearing.isOnTarget(aim = 100f, target = 120f))
         assertFalse(Bearing.isOnTarget(aim = 100f, target = 140f))
     }
+
+    @Test
+    fun `coincident bearings have zero angular distance and are on target`() {
+        // Bearings are captured directly by the greeting handshake, so a player can in
+        // principle report the same azimuth toward two opponents. Aiming exactly at a
+        // captured bearing must register as on-target with zero distance.
+        assertEquals(0f, Bearing.angularDistance(123f, 123f), tolerance)
+        assertTrue(Bearing.isOnTarget(aim = 123f, target = 123f))
+    }
 }
