@@ -22,11 +22,38 @@ import java.util.Locale
  *
  * The handler chains to the previously-installed default handler, so the OS
  * still records the crash in logcat and shows its normal dialog.
+ *
+ * ## Privacy policy — keep peer- and user-supplied data out of crash reports
+ *
+ * The persisted report is app-private (written to [Context.getFilesDir]), but it
+ * is surfaced in a copy/shareable dialog, so anything that reaches it can leave the
+ * device the moment a tester shares it. The report intentionally contains only a
+ * timestamp, the thread name, a device fingerprint ([Build]), and the stack trace —
+ * no credentials, location, player names, or network payloads. To keep the share
+ * path safe as the code evolves:
+ *
+ * - **Exception messages must never embed peer- or user-supplied strings** — player
+ *   names, decoded payload contents, discovered endpoint names, file paths, etc.
+ *   Throw with static, developer-authored messages; never interpolate untrusted
+ *   input into a throw (e.g. `IllegalStateException("bad name: $peerName")`). A stack
+ *   trace carries no such data on its own — only this policy keeps it that way, since
+ *   an exception message is rendered into the trace and thus into the shared report.
+ * - The captured trace is capped at [MAX_STACK_TRACE_CHARS] before it is stored
+ *   ([capStackTrace]) — a defence-in-depth bound on how much can ever be exported in
+ *   one share if the rule above is violated or a trace is pathologically large.
  */
 object CrashReporter {
 
     private const val TAG = "CrashReporter"
     private const val CRASH_FILE_NAME = "last_crash.txt"
+
+    /**
+     * Upper bound on the stack-trace characters included in a report. A real trace is
+     * far smaller; this only bounds the worst case (see the privacy policy above).
+     */
+    private const val MAX_STACK_TRACE_CHARS = 8_000
+
+    private const val TRUNCATION_MARKER = "\n… [stack trace truncated]"
 
     /**
      * Installs a default uncaught-exception handler that writes the stack trace to
@@ -70,7 +97,7 @@ object CrashReporter {
         return text
     }
 
-    /** Builds the human-readable report body: metadata header plus the full stack trace. */
+    /** Builds the human-readable report body: metadata header plus the (capped) stack trace. */
     internal fun formatReport(thread: Thread, throwable: Throwable): String {
         val stackTrace = StringWriter().also { sw ->
             PrintWriter(sw).use { throwable.printStackTrace(it) }
@@ -85,9 +112,20 @@ object CrashReporter {
                     "(Android ${Build.VERSION.RELEASE}, API ${Build.VERSION.SDK_INT})",
             )
             appendLine()
-            append(stackTrace)
+            append(capStackTrace(stackTrace))
         }
     }
+
+    /**
+     * Caps [stackTrace] at [MAX_STACK_TRACE_CHARS], appending [TRUNCATION_MARKER] when
+     * truncated, so a shared report can never export an unbounded blob (see policy).
+     */
+    internal fun capStackTrace(stackTrace: String): String =
+        if (stackTrace.length <= MAX_STACK_TRACE_CHARS) {
+            stackTrace
+        } else {
+            stackTrace.take(MAX_STACK_TRACE_CHARS) + TRUNCATION_MARKER
+        }
 
     private fun crashFile(context: Context): File = File(context.filesDir, CRASH_FILE_NAME)
 }

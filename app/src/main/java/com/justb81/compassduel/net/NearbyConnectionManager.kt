@@ -147,7 +147,12 @@ class NearbyConnectionManager @Inject constructor(
                 val message = MessageCodec.decode(bytes)
                 _incomingMessages.tryEmit(endpointId to message)
             } catch (e: kotlinx.serialization.SerializationException) {
-                Log.w(TAG, "Dropped malformed payload from $endpointId: ${e.message}")
+                // Log the exception *type* only, never e.message: a SerializationException
+                // can echo the malformed peer payload's contents, and logging untrusted peer
+                // data is the kind of leak CrashReporter's privacy policy guards against. The
+                // endpoint id (an ephemeral Nearby handle) and the failure type are enough to
+                // diagnose a decode failure.
+                Log.w(TAG, "Dropped malformed payload from $endpointId (${e.javaClass.simpleName})")
             }
         }
 

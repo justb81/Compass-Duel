@@ -67,4 +67,21 @@ class CrashReporterTest {
 
         assertTrue(report.lineSequence().first().startsWith("Time: "), "report should start with a Time header")
     }
+
+    @Test
+    fun `capStackTrace leaves a short trace unchanged`() {
+        val trace = "short trace\n\tat Foo.bar(Foo.kt:1)"
+
+        assertTrue(CrashReporter.capStackTrace(trace) == trace, "a short trace must not be altered")
+    }
+
+    @Test
+    fun `capStackTrace truncates an oversized trace and marks it`() {
+        val oversized = "x".repeat(20_000)
+
+        val capped = CrashReporter.capStackTrace(oversized)
+
+        assertTrue(capped.length < oversized.length, "an oversized trace must be shortened")
+        assertTrue(capped.endsWith("[stack trace truncated]"), "a truncated trace must be marked")
+    }
 }
