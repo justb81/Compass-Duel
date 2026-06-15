@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.3](https://github.com/justb81/Compass-Duel/compare/v0.9.2...v0.9.3) (2026-06-15)
+
+
+### Bug Fixes
+
+* **ui:** make attack/defense action effects actually render ([#34](https://github.com/justb81/Compass-Duel/issues/34)) ([#111](https://github.com/justb81/Compass-Duel/issues/111)) ([c1016b6](https://github.com/justb81/Compass-Duel/commit/c1016b627153b0521983b676099b1e1e74f224e0))
+
 ## [0.9.2](https://github.com/justb81/Compass-Duel/compare/v0.9.1...v0.9.2) (2026-06-15)
 
 
