@@ -20,8 +20,8 @@ import com.justb81.compassduel.sensor.MovementDetector
 import com.justb81.compassduel.sensor.OrientationSensor
 import com.justb81.compassduel.session.GameSession
 import com.justb81.compassduel.ui.components.ActionEffect
-import com.justb81.compassduel.ui.components.ActionEffectKind
 import com.justb81.compassduel.ui.components.CompassTarget
+import com.justb81.compassduel.ui.components.actionEffectKindFor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -231,12 +231,6 @@ class GameViewModel @Inject constructor(
     // animation even when the same effect kind repeats back-to-back.
     private var actionEffectTrigger = 0L
 
-    // Local player's status in the previous snapshot, used to fire the
-    // projectile effect on the IDLE/RESTING -> ATTACKING transition (the host
-    // emits no "attack started" event, so we read it off the status it already
-    // reports in every snapshot).
-    private var lastStatus = PlayerStatus.IDLE
-
     init {
         observeSensors()
         observeSnapshot()
@@ -347,7 +341,6 @@ class GameViewModel @Inject constructor(
                     }
                     RoundPhase.ROUND_OVER -> {
                         stopPipeline()
-                        lastStatus = PlayerStatus.IDLE
                         latestRawAzimuth = null
                         _uiState.value = GameUiState.RoundOver
                     }
@@ -413,7 +406,7 @@ class GameViewModel @Inject constructor(
         }
 
         val myStatus = mySnap?.status ?: PlayerStatus.IDLE
-        val resolvedEffect = resolveActionEffect(snapshot, myStatus, myId, mode, myLobby?.element)
+        val resolvedEffect = resolveActionEffect(snapshot, myId, mode, myLobby?.element)
 
         return GameUiState.Playing(
             mode = mode,
@@ -561,44 +554,22 @@ class GameViewModel @Inject constructor(
     // -------------------------------------------------------------------------
 
     /**
-     * Picks the one-shot [ActionEffectKind] for this snapshot, branching on mode.
-     *
-     * Impacts are driven by host [com.justb81.compassduel.net.protocol.GameEvent]s
-     * (HIT / BLOCKED in Standard, CAUGHT / BUBBLED in Kids). The projectile is
-     * fired on the local player's transition into [PlayerStatus.ATTACKING], which
-     * the host already reports in every snapshot — no new payload is introduced.
-     *
-     * Kids Mode never returns [ActionEffectKind.DAMAGE_TAKEN]; incoming
-     * sparkles read as friendly catches/bubbles only.
-     */
-    private fun computeActionEffectKind(
-        events: List<com.justb81.compassduel.net.protocol.GameEvent>,
-        myStatus: PlayerStatus,
-        myId: Int,
-        mode: GameMode,
-    ): ActionEffectKind? {
-        val justStartedAttacking = myStatus == PlayerStatus.ATTACKING && lastStatus != PlayerStatus.ATTACKING
-        lastStatus = myStatus
-
-        val fromEvents = events.firstNotNullOfOrNull { eventToEffectKind(it, myId, mode) }
-        // Impacts win over the launch effect within the same snapshot.
-        return fromEvents ?: if (justStartedAttacking) ActionEffectKind.PROJECTILE_FIRED else null
-    }
-
-    /**
      * Resolves the transient action effect for the current snapshot and schedules
      * it to clear after [ACTION_EFFECT_DURATION_MILLIS]; falls back to the effect
      * already showing when no new one fires. [rawElement] themes Standard-Mode
      * effects and is ignored in Kids Mode.
+     *
+     * The effect kind is derived purely from the host events via [actionEffectKindFor]
+     * — the local player's own resolved attack drives the projectile, so no new
+     * network payload is introduced.
      */
     private fun resolveActionEffect(
         snapshot: GameSnapshot,
-        myStatus: PlayerStatus,
         myId: Int,
         mode: GameMode,
         rawElement: Element?,
     ): ActionEffect? {
-        val effectKind = computeActionEffectKind(snapshot.events, myStatus, myId, mode)
+        val effectKind = snapshot.events.firstNotNullOfOrNull { actionEffectKindFor(it, myId, mode) }
         val element = if (mode == GameMode.STANDARD) rawElement else null
         val newEffect = effectKind?.let { kind ->
             actionEffectTrigger += 1
@@ -609,25 +580,6 @@ class GameViewModel @Inject constructor(
             effectSlot.value = newEffect
         }
         return newEffect ?: (_uiState.value as? GameUiState.Playing)?.actionEffect
-    }
-
-    /** Maps a single host [GameEvent] to the effect it should play for the local player, or null. */
-    private fun eventToEffectKind(
-        event: com.justb81.compassduel.net.protocol.GameEvent,
-        myId: Int,
-        mode: GameMode,
-    ): ActionEffectKind? = when {
-        mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.actorId == myId ->
-            ActionEffectKind.IMPACT_LANDED
-        mode == GameMode.STANDARD && event.type == GameEventType.BLOCKED && event.actorId == myId ->
-            ActionEffectKind.IMPACT_BLOCKED
-        mode == GameMode.STANDARD && event.type == GameEventType.HIT && event.targetId == myId ->
-            ActionEffectKind.DAMAGE_TAKEN
-        mode == GameMode.KIDS && event.type == GameEventType.CAUGHT && event.actorId == myId ->
-            ActionEffectKind.IMPACT_LANDED
-        mode == GameMode.KIDS && event.type == GameEventType.BUBBLED && event.targetId == myId ->
-            ActionEffectKind.IMPACT_BLOCKED
-        else -> null
     }
 
     // -------------------------------------------------------------------------
@@ -674,7 +626,10 @@ class GameViewModel @Inject constructor(
         private const val INITIAL_COUNTDOWN_SECONDS = 3
         private const val MILLIS_PER_SECOND = 1_000L
         private const val FLASH_DURATION_MILLIS = 500L
-        private const val ACTION_EFFECT_DURATION_MILLIS = 500L
+
+        // Must outlast the overlay's flight + impact animation so the effect state
+        // is not cleared mid-sequence (see ActionEffects EFFECT_DURATION_MILLIS = 600).
+        private const val ACTION_EFFECT_DURATION_MILLIS = 650L
 
         /** Emoji + name label for each element (keyed by enum name). */
         private val ELEMENT_EMOJIS = mapOf(

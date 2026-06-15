@@ -28,10 +28,9 @@ import kotlin.math.sin
  * Transient, element-aware action effect surfaced by the game ViewModel and
  * drawn over the [CompassRing] and the flash overlay.
  *
- * Effects are derived entirely from events/state the ViewModel already observes
- * (host [com.justb81.compassduel.net.protocol.GameEvent]s, the local player's
- * [com.justb81.compassduel.net.protocol.PlayerStatus], and the on-target
- * reticle) — no new network payload fields or engine messages are introduced.
+ * Effects are derived entirely from events the ViewModel already observes (host
+ * [com.justb81.compassduel.net.protocol.GameEvent]s, mapped by [actionEffectKindFor])
+ * — no new network payload fields or engine messages are introduced.
  *
  * @param kind The category of effect to play.
  * @param element The local player's element for Standard-Mode theming; null in Kids Mode.
@@ -44,16 +43,23 @@ data class ActionEffect(
     val triggerId: Long,
 )
 
-/** Categories of one-shot action effects. */
+/**
+ * Categories of one-shot action effects. The three `ATTACK_*` kinds are the local
+ * player's own resolved attack: they sequence a projectile flying to the reticle
+ * and then its outcome (landed/blocked burst, or a miss fizzle).
+ */
 enum class ActionEffectKind {
-    /** Local player launched an attack/toss — projectile flies up toward the reticle. */
-    PROJECTILE_FIRED,
+    /** Local attack landed — projectile flies to the reticle, then a hit/catch burst. */
+    ATTACK_LANDED,
 
-    /** Local player landed a hit (Standard) or a catch (Kids) — burst at the reticle. */
-    IMPACT_LANDED,
+    /** Local attack was blocked/bubbled — projectile flies, then a guarded burst. */
+    ATTACK_BLOCKED,
 
-    /** Local player's attack was blocked/bubbled — guarded burst at the reticle. */
-    IMPACT_BLOCKED,
+    /** Local attack missed — projectile flies past the reticle and fizzles out. */
+    ATTACK_MISSED,
+
+    /** Local player blocked an incoming attack (Kids bubble) — guarded burst, no projectile. */
+    DEFENSE_BLOCKED,
 
     /** Local player took damage (Standard only) — inward shock from the screen edge. */
     DAMAGE_TAKEN,
@@ -106,9 +112,10 @@ fun ActionEffectOverlay(
         val t = progress.value
         if (t >= 1f) return@Canvas
         when (active.kind) {
-            ActionEffectKind.PROJECTILE_FIRED -> drawProjectile(centre, radius, palette, mode, t)
-            ActionEffectKind.IMPACT_LANDED -> drawImpactBurst(centre, radius, palette, mode, landed = true, t = t)
-            ActionEffectKind.IMPACT_BLOCKED -> drawImpactBurst(centre, radius, palette, mode, landed = false, t = t)
+            ActionEffectKind.ATTACK_LANDED -> drawAttack(centre, radius, palette, mode, AttackOutcome.LANDED, t)
+            ActionEffectKind.ATTACK_BLOCKED -> drawAttack(centre, radius, palette, mode, AttackOutcome.BLOCKED, t)
+            ActionEffectKind.ATTACK_MISSED -> drawAttack(centre, radius, palette, mode, AttackOutcome.MISSED, t)
+            ActionEffectKind.DEFENSE_BLOCKED -> drawImpactBurst(centre, radius, palette, mode, landed = false, t = t)
             ActionEffectKind.DAMAGE_TAKEN -> drawDamageShock(centre, radius, t)
         }
     }
@@ -151,6 +158,35 @@ private data class EffectPalette(val primary: Color, val accent: Color)
 // One-shot effects
 // -------------------------------------------------------------------------
 
+/** Outcome of the local player's own attack, used to sequence the flight + impact. */
+private enum class AttackOutcome { LANDED, BLOCKED, MISSED }
+
+/**
+ * The local player's own attack: a projectile flies to the reticle over the first
+ * [FLIGHT_FRACTION] of the animation, then resolves into a hit/block burst (or a
+ * miss fizzle) over the remainder. The host resolves attacks instantly, so this
+ * single client-side sequence is what makes a shot read as a physical event.
+ */
+private fun DrawScope.drawAttack(
+    centre: Offset,
+    radius: Float,
+    palette: EffectPalette,
+    mode: GameMode,
+    outcome: AttackOutcome,
+    t: Float,
+) {
+    if (t < FLIGHT_FRACTION) {
+        drawProjectile(centre, radius, palette, mode, t / FLIGHT_FRACTION)
+        return
+    }
+    val resolveT = ((t - FLIGHT_FRACTION) / (1f - FLIGHT_FRACTION)).coerceIn(0f, 1f)
+    when (outcome) {
+        AttackOutcome.LANDED -> drawImpactBurst(centre, radius, palette, mode, landed = true, t = resolveT)
+        AttackOutcome.BLOCKED -> drawImpactBurst(centre, radius, palette, mode, landed = false, t = resolveT)
+        AttackOutcome.MISSED -> drawMissFizzle(centre, radius, palette, resolveT)
+    }
+}
+
 /** A projectile/particle travelling from the ring centre up toward the reticle. */
 private fun DrawScope.drawProjectile(
     centre: Offset,
@@ -163,9 +199,9 @@ private fun DrawScope.drawProjectile(
     val travel = centre.y - reticleY
     val headY = centre.y - travel * t
     val head = Offset(centre.x, headY)
-    val alpha = (1f - t).coerceIn(0f, 1f)
 
     // A few trailing particles behind the head — fixed count, no per-frame allocation.
+    // The head stays bright for the whole (short) flight; only the trail fades back.
     for (i in 0 until PROJECTILE_PARTICLES) {
         val lag = i * PROJECTILE_LAG
         val pt = (t - lag).coerceAtLeast(0f)
@@ -173,15 +209,30 @@ private fun DrawScope.drawProjectile(
         val spread = (sin((pt + i) * PROJECTILE_WOBBLE) * PROJECTILE_SPREAD_DP.dp.toPx())
         val pos = Offset(centre.x + spread, py)
         val pr = PROJECTILE_RADIUS_DP.dp.toPx() * (1f - i.toFloat() / PROJECTILE_PARTICLES)
-        drawCircle(palette.accent.copy(alpha = alpha * TRAIL_ALPHA), radius = pr, center = pos)
+        val trailAlpha = TRAIL_ALPHA * (1f - i.toFloat() / PROJECTILE_PARTICLES)
+        drawCircle(palette.accent.copy(alpha = trailAlpha), radius = pr, center = pos)
     }
     // Head — slightly larger glowing core.
-    drawCircle(palette.primary.copy(alpha = alpha * GLOW_ALPHA), radius = PROJECTILE_RADIUS_DP.dp.toPx() * GLOW_SCALE, center = head)
-    drawCircle(palette.primary.copy(alpha = alpha), radius = PROJECTILE_RADIUS_DP.dp.toPx(), center = head)
+    drawCircle(palette.primary.copy(alpha = GLOW_ALPHA), radius = PROJECTILE_RADIUS_DP.dp.toPx() * GLOW_SCALE, center = head)
+    drawCircle(palette.primary, radius = PROJECTILE_RADIUS_DP.dp.toPx(), center = head)
     if (mode == GameMode.KIDS) {
         // Friendly sparkle cross on the head.
-        drawSparkle(head, PROJECTILE_RADIUS_DP.dp.toPx() * SPARKLE_SCALE, palette.accent.copy(alpha = alpha))
+        drawSparkle(head, PROJECTILE_RADIUS_DP.dp.toPx() * SPARKLE_SCALE, palette.accent)
     }
+}
+
+/** A fading puff at the reticle when the local attack missed — no burst, just a whiff. */
+private fun DrawScope.drawMissFizzle(
+    centre: Offset,
+    radius: Float,
+    palette: EffectPalette,
+    t: Float,
+) {
+    val reticleY = centre.y - radius * RETICLE_POSITION_FACTOR
+    val at = Offset(centre.x, reticleY)
+    val alpha = (1f - t).coerceIn(0f, 1f) * MISS_ALPHA
+    val puffRadius = PROJECTILE_RADIUS_DP.dp.toPx() * (1f + t * MISS_GROWTH)
+    drawCircle(palette.accent.copy(alpha = alpha), radius = puffRadius, center = at)
 }
 
 /** A radial burst at the reticle when the local attack lands or is blocked. */
@@ -288,8 +339,12 @@ private operator fun Offset.times(scalar: Float): Offset = Offset(x * scalar, y 
 // -------------------------------------------------------------------------
 
 private const val TWO_PI = (2.0 * Math.PI).toFloat()
-private const val EFFECT_DURATION_MILLIS = 450
+private const val EFFECT_DURATION_MILLIS = 600
 private const val AURA_PERIOD_MILLIS = 1_400
+
+// Fraction of the attack animation spent flying the projectile before it resolves
+// into an impact burst (or a miss fizzle) over the remaining fraction.
+private const val FLIGHT_FRACTION = 0.55f
 
 // Must mirror CompassRing's ring/reticle geometry so effects land on the ring.
 private const val RING_RADIUS_FACTOR = 0.85f
@@ -317,6 +372,10 @@ private const val KIDS_SPOKES = 6
 private const val SPARKLE_DOT_DP = 3f
 private const val BLOCK_GUARD_FACTOR = 0.7f
 private const val BLOCK_STROKE_SCALE = 1.5f
+
+// Miss fizzle
+private const val MISS_ALPHA = 0.5f
+private const val MISS_GROWTH = 1.5f
 
 // Damage shock
 private const val DAMAGE_ALPHA = 0.5f
