@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/justb81/Compass-Duel/compare/v0.9.1...v0.9.2) (2026-06-15)
+
+
+### Bug Fixes
+
+* **crash:** cap shared stack trace and document the no-PII policy ([#109](https://github.com/justb81/Compass-Duel/issues/109)) ([a7d40a8](https://github.com/justb81/Compass-Duel/commit/a7d40a8daf5121862791c77305534d444d3f42e5)), closes [#44](https://github.com/justb81/Compass-Duel/issues/44)
+
 ## [0.9.1](https://github.com/justb81/Compass-Duel/compare/v0.9.0...v0.9.1) (2026-06-14)
 
 
