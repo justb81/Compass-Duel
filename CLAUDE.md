@@ -174,18 +174,16 @@ depends on the opt-in local hook. `validate-release-security.py` additionally
 rejects any `${{ … }}` interpolated directly into a Gradle step's `run:` (pass
 values via `env:` and reference shell variables instead).
 
-**Sandboxed environments without the Android SDK** (Claude Code on the web,
-ephemeral runners): `precommit.sh` detects a missing SDK and **skips only the
-Gradle scope** with a loud warning, while still running the workflow-YAML
-checks. The commit proceeds and CI (`build-android.yml`) becomes the real gate
-for Kotlin/Android changes. In that situation, surface the skip in the PR
-description and treat a red `Test & Build` check as a blocker. Do **not** pass
+**Android SDK in this environment:** `ANDROID_HOME=/root/android-sdk` is set
+and `sdkmanager` is installed. Platform components (build-tools, platforms) are
+auto-downloaded on the first Gradle run. `precommit.sh` therefore runs the full
+Gradle scope (tests + detekt + lint) without skipping. Do **not** pass
 `--no-verify`.
 
-#### CI-only failure modes (no SDK locally → these only surface in CI)
+#### Known pitfalls — check before pushing
 
-When the Gradle scope is skipped, CI is the sole gate for Kotlin. These recur —
-check them before pushing to save a red-CI round-trip:
+These issues are caught by `precommit.sh` (and CI) — fix them before committing
+to avoid a red-CI round-trip:
 
 - **`@Volatile` applies to fields, not local variables.** A `var` captured by a
   closure (e.g. a `SensorEventListener` inside a `callbackFlow`) cannot be
