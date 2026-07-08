@@ -148,6 +148,7 @@ tasks.withType<Test>().configureEach {
 dependencies {
     add("implementation", libs.hilt.android)
     add("ksp", libs.hilt.compiler)
+    add("compileOnly", libs.errorprone.annotations)
 
     add("testImplementation", libs.junit5.api)
     add("testImplementation", libs.junit5.params)
