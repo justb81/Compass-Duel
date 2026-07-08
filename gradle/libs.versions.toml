@@ -2,7 +2,7 @@
 agp = "9.2.1"
 # Kotlin is intentionally held at 2.3.21 (latest 2.3.x). Do NOT bump to 2.4.0
 # yet: the toolchain has no 2.4.0-compatible releases. KSP's latest is 2.3.9
-# (targets Kotlin 2.3.x) and Dagger/Hilt's latest is 2.60, which bundles
+# (targets Kotlin 2.3.x) and Dagger/Hilt's latest is 2.60.1, which bundles
 # kotlin-metadata-jvm 2.2.20 and rejects Kotlin 2.4.0 class metadata in the
 # hiltJavaCompile step ("Provided Metadata instance has version 2.4.0, while
 # maximum supported version is 2.3.0"). Bump only once KSP and Dagger/Hilt ship
@@ -10,15 +10,14 @@ agp = "9.2.1"
 # The compose-compiler and kotlin-serialization plugins track this version.
 kotlin = "2.3.21"
 ksp = "2.3.9"
-hilt = "2.60"
-# Dagger/Hilt 2.60's generated Hilt components import
+hilt = "2.60.1"
+# Dagger/Hilt's generated Hilt components import
 # com.google.errorprone.annotations.CanIgnoreReturnValue. hilt-android-compiler
 # pulls error_prone_annotations onto the KSP classpath, but hilt-android does
 # not pull it onto the app's compile classpath, so hiltJavaCompileDebug fails
 # with "package com.google.errorprone.annotations does not exist" unless it is
-# added explicitly (see compileOnly(libs.errorprone.annotations) below). Kept
-# in sync with the version hilt-android-compiler:2.60 resolves.
-errorproneAnnotations = "2.47.0"
+# added explicitly (see compileOnly(libs.errorprone.annotations) below).
+errorproneAnnotations = "2.50.0"
 compose-bom = "2026.06.01"
 lifecycle = "2.11.0"
 coroutines = "1.11.0"
