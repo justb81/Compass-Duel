@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.4](https://github.com/justb81/Compass-Duel/compare/v0.9.3...v0.9.4) (2026-07-11)
+
+
+### Bug Fixes
+
+* **build:** add error_prone_annotations for Hilt 2.60 compile classpath ([#124](https://github.com/justb81/Compass-Duel/issues/124)) ([721f93d](https://github.com/justb81/Compass-Duel/commit/721f93df54429948e7fe2d9203b766dc8031f936))
+
 ## [0.9.3](https://github.com/justb81/Compass-Duel/compare/v0.9.2...v0.9.3) (2026-06-15)
 
 
