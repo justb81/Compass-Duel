@@ -9,7 +9,7 @@ agp = "9.2.1"
 # 2.4.0-compatible releases (the Dependabot 2.4.0 bump is ignored until then).
 # The compose-compiler and kotlin-serialization plugins track this version.
 kotlin = "2.3.21"
-ksp = "2.3.9"
+ksp = "2.3.10"
 hilt = "2.60.1"
 # Dagger/Hilt's generated Hilt components import
 # com.google.errorprone.annotations.CanIgnoreReturnValue. hilt-android-compiler
