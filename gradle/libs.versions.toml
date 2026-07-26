@@ -1,5 +1,5 @@
 [versions]
-agp = "9.3.0"
+agp = "9.3.1"
 # Kotlin is intentionally held at 2.3.21 (latest 2.3.x). Do NOT bump to 2.4.0
 # yet: the toolchain has no 2.4.0-compatible releases. KSP's latest is 2.3.9
 # (targets Kotlin 2.3.x) and Dagger/Hilt's latest is 2.60.1, which bundles
