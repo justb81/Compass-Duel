@@ -31,7 +31,7 @@ turbine = "1.2.1"
 robolectric = "4.16.1"
 androidx-test-core = "1.7.0"
 androidx-arch-core = "2.2.0"
-gradlePlayPublisher = "4.0.0"
+gradlePlayPublisher = "4.1.0"
 detekt = "1.23.8"
 
 [libraries]
