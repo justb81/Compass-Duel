@@ -18,7 +18,7 @@ hilt = "2.60.1"
 # with "package com.google.errorprone.annotations does not exist" unless it is
 # added explicitly (see compileOnly(libs.errorprone.annotations) below).
 errorproneAnnotations = "2.50.0"
-compose-bom = "2026.06.01"
+compose-bom = "2026.08.00"
 lifecycle = "2.11.0"
 coroutines = "1.11.0"
 serialization = "1.11.0"
