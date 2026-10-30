@@ -17,7 +17,7 @@ hilt = "2.60.1"
 # not pull it onto the app's compile classpath, so hiltJavaCompileDebug fails
 # with "package com.google.errorprone.annotations does not exist" unless it is
 # added explicitly (see compileOnly(libs.errorprone.annotations) below).
-errorproneAnnotations = "2.50.0"
+errorproneAnnotations = "2.51.0"
 compose-bom = "2026.09.00"
 lifecycle = "2.11.0"
 coroutines = "1.11.0"
